@@ -1,0 +1,26 @@
+# CODEOWNERS for hoprnet
+# This file defines the default code owners for different parts of the repository.
+# Code owners are automatically requested for review when someone opens a pull request
+# that modifies code that they own.
+#
+# Based on Git commit history analysis from the last 6 months.
+# Last updated: 2025-08-06
+
+# Default owners for everything
+* @Teebor-Choka @tolbrino @NumberFour8 @jeandemeusy @QYuQianchen @ausias-armesto
+
+# GitHub Actions workflows and CI/CD
+/.github/ @ausias-armesto @tolbrino @Teebor-Choka
+
+# Top-level products
+/src/ @qYuQianchen @ausias-armesto @jeandemeusy
+
+# Build and configuration
+*.nix @tolbrino @ausias-armesto @Teebor-Choka
+*.toml @Teebor-Choka @NumberFour8 @QYuQianchen
+
+# Secure changes to critical files
+/.github/CODEOWNERS @tolbrino @Teebor-Choka @ausias-armesto
+
+# Emergency contacts (for critical issues)
+# Lead maintainers: @QYuQianchen @Teebor-Choka @tolbrino
