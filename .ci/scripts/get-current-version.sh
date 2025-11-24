@@ -23,7 +23,7 @@ declare mydir
 mydir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 version_type=${1:-semver}
-current_version=$(grep -E '^version\s*=' ${mydir}/../hopr/hopr-lib/Cargo.toml | awk -F\" '{print $2}')
+current_version=$(grep -E '^version\s*=' ${mydir}/../../Cargo.toml | awk -F\" '{print $2}')
 
 if [ "${version_type}" == "docker" ]; then
   echo ${current_version}

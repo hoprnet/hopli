@@ -1,9 +1,6 @@
----
 name: Zizmor
-
 env:
   needs_nix_setup: false
-
 on:
   merge_group:
     types: [checks_requested]
@@ -15,13 +12,10 @@ on:
       source_branch:
         required: true
         type: string
-
 concurrency:
   group: ${{ inputs.source_branch || github.ref_name }}-zizmor
   cancel-in-progress: true
-
 permissions: {}
-
 jobs:
   zizmor:
     name: Zizmor
@@ -35,20 +29,17 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_branch }}
-
       - name: Install Nix
         if: env.needs_nix_setup == true
         uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
         if: env.needs_nix_setup == true
         with:
@@ -56,12 +47,10 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         env:
           USER: runner
-
       - name: Run zizmor
         run: nix develop -L .#ci -c bash -c "zizmor --format sarif . > results.sarif"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@014f16e7ab1402f30e7c3329d33797e7948572db # v4.31.3
         with:

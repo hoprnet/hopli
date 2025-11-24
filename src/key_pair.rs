@@ -468,7 +468,7 @@ impl IdentityFileArgs {
     }
 
     /// read identity files and return their Ethereum addresses
-    pub fn to_addresses(self) -> Result<Vec<Address>, HelperErrors> {
+    pub fn to_addresses(&self) -> Result<Vec<Address>, HelperErrors> {
         let files = self.clone().get_files()?;
 
         // get Ethereum addresses from identity files

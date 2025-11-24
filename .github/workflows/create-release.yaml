@@ -1,9 +1,7 @@
----
 #################################################################################
 # Internal workflow to create github release
 #################################################################################
 name: Create Release
-
 on:
   workflow_call:
     inputs:
@@ -21,11 +19,9 @@ on:
         description: 'The head branch from which download artifacts'
         required: true
         type: string
-
 concurrency:
   group: create-release
   cancel-in-progress: false
-
 jobs:
   create_release:
     name: Create Release
@@ -36,7 +32,6 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Set environment variables
         id: vars
         run: |
@@ -49,7 +44,6 @@ jobs:
             echo "base_branch=${{ github.ref_name }}" | tee -a $GITHUB_OUTPUT
             echo "head_branch=${{ github.event.inputs.head_branch }}" | tee -a $GITHUB_OUTPUT
           fi
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -57,7 +51,6 @@ jobs:
           # Using a PAT because this job can be invoked from `pull_request_target`
           token: ${{ secrets.GH_RUNNER_TOKEN }}
           ref: ${{ steps.vars.outputs.base_branch }}
-
       - name: Setup GCP
         id: gcp
         uses: hoprnet/hopr-workflows/actions/setup-gcp@12c56020e16036982e6cc529848edeedfc705865 # master
@@ -65,13 +58,11 @@ jobs:
           google-credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
           login-artifact-registry: 'true'
           install-sdk: 'true'
-
       - name: Log in to Docker Hub
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
       - name: Setup workspace
         id: setup
         run: |
@@ -85,13 +76,11 @@ jobs:
           ./.ci/scripts/download-workflow-binaries.sh ${{ steps.vars.outputs.head_branch }}
         env:
           GH_TOKEN: ${{ secrets.GH_RUNNER_TOKEN }}
-
       - name: Generate Changelog
         run: |
           ./.ci/scripts/generate-changelog.sh ${{ steps.setup.outputs.current_version }} github | tee docs/changelog/changelog.md
         env:
           GH_TOKEN: ${{ github.token }}
-
       - name: Tag repository
         id: tag
         run: |
@@ -108,7 +97,6 @@ jobs:
           git tag --force "${release_name}"
           git push --force origin "${release_name}"
           echo "release_name=${release_name}" >> $GITHUB_OUTPUT
-
       - name: Tag docker images with release name
         run: |
           images=(hopli)
@@ -129,7 +117,6 @@ jobs:
             docker push "${{ vars.DOCKER_HUB_ORGANIZATION_NAME }}/${image}:${{ steps.setup.outputs.current_version }}"
             docker push "${{ vars.DOCKER_HUB_ORGANIZATION_NAME }}/${image}:${{ steps.tag.outputs.release_name }}"
           done
-
       - name: Create Release
         uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
         with:
@@ -140,7 +127,6 @@ jobs:
           files: ./dist/upload/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Update Homebrew formula
         uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
@@ -152,7 +138,6 @@ jobs:
               "base_branch": "${{ steps.vars.outputs.base_branch }}",
               "version": "${{ steps.setup.outputs.current_version }}"
             }
-
       - name: Close Milestone
         run: |
           milestone_number=$(gh api repos/${{ github.repository }}/milestones | jq -r --arg version "${{ steps.setup.outputs.current_version }}"  ' to_entries[] | select(.value.title | test($version)).value.number')
@@ -163,7 +148,6 @@ jobs:
             -f state='closed'
         env:
           GH_TOKEN: ${{ secrets.GH_RUNNER_TOKEN }}
-
       - name: Notify release
         uses: zulip/github-actions-zulip/send-message@e4c8f27c732ba9bd98ac6be0583096dea82feea5 # v1.0.2
         with:
@@ -179,4 +163,3 @@ jobs:
             I'm thrilled to inform the new hopli version v${{ steps.setup.outputs.current_version }} has been released.
             [Release Notes](https://github.com/hoprnet/hopli/releases/tag/v${{ steps.setup.outputs.current_version }})
             [Docker Hub](https://hub.docker.com/r/hoprnet/hopli)
-

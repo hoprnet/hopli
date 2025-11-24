@@ -1,9 +1,7 @@
----
 #################################################################################
 # Pipeline to check opened PR labels and title.
 #################################################################################
 name: Open PR
-
 on:
   pull_request_target:
     types:
@@ -11,14 +9,11 @@ on:
       - reopened
       - ready_for_review
       - review_requested
-
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.event.pull_request.number }}-open-pr
   cancel-in-progress: false
-
 jobs:
   validate-pr-title:
     name: PR / Validate title
@@ -67,16 +62,13 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-
       - uses: actions/labeler@25abb3cad4f14b7ac27968a495c37798860a5a1a # main on 20.02.2025
         with:
           sync-labels: true
-
       - name: Add "external" label for forked PRs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

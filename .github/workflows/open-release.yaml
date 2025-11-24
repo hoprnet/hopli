@@ -1,12 +1,9 @@
----
 #################################################################################
 # Internal pipeline triggered by a merged pull request labeled with 'release' to perform the following steps:
 # 1. Create a pull request to bump version
 # 2. Create the new milestone
 #################################################################################
-
 name: Open Release
-
 on:
   workflow_call:
     inputs:
@@ -28,14 +25,11 @@ on:
           - Patch
           - ReleaseCandidate
         default: Patch
-
 concurrency:
   group: open-release
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   open-release:
     name: Open Release
@@ -46,8 +40,6 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
-
       - name: Set environment variables
         id: vars
         run: |
@@ -62,20 +54,17 @@ jobs:
             echo "source_branch=${{ github.ref_name }}" | tee -a $GITHUB_OUTPUT
             echo "release_type=${{ github.event.inputs.release_type }}" | tee -a $GITHUB_OUTPUT
           fi
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           ref: "${{ steps.vars.outputs.source_branch }}"
-
       - name: Bump Version
         id: bump
         run: |
           next_version=$(./.ci/scripts/get-next-version.sh ${{ steps.vars.outputs.release_type }})
           ./.ci/scripts/bump-version.sh ${next_version}
           echo "next_version=${next_version}" >> $GITHUB_OUTPUT
-
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
         with:
@@ -89,7 +78,6 @@ jobs:
           draft: true
           assignees: ${{ github.actor }}
           team-reviewers: "@hoprnet/hopr-development"
-
       - name: Enable Auto Merge
         run: |
           git fetch
@@ -98,7 +86,6 @@ jobs:
           gh pr ready
         env:
           GH_TOKEN: ${{ secrets.GH_RUNNER_TOKEN }}
-
       - name: Create Milestone
         run: |
           milestone_number=$(gh api "repos/${{ github.repository }}/milestones" | jq -r --arg version "${{ steps.bump.outputs.next_version }}"  ' to_entries[] | select(.value.title | test($version)).value.number')

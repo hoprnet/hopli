@@ -1,13 +1,10 @@
----
 #################################################################################
 # Pipeline triggered on every pull request to check lint compliance
 #################################################################################
 name: Lint
-
 env:
   RUST_BACKTRACE: "1"
   needs_nix_setup: false
-
 on:
   merge_group:
     types: [checks_requested]
@@ -19,14 +16,11 @@ on:
       source_branch:
         required: true
         type: string
-
 concurrency:
   group: ${{ inputs.source_branch || github.ref_name }}-lint
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   lint:
     name: Lint
@@ -38,20 +32,17 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_branch }}
-
       - name: Install Nix
         if: env.needs_nix_setup == true
         uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
         if: env.needs_nix_setup == true
         with:
@@ -59,6 +50,5 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         env:
           USER: runner
-
       - name: Run linter
         run: nix run -L .#check

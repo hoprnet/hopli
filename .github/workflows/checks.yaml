@@ -1,9 +1,7 @@
----
 ################################################################################
 # Main pipeline to run checks hoprnet
 ################################################################################
 name: Checks
-
 on:
   merge_group:
     types: [checks_requested]
@@ -13,16 +11,13 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-
 permissions:
   actions: read
   security-events: write
   contents: read
-
 concurrency:
   group: ${{ github.event.pull_request.head.ref || github.ref_name }}-checks
   cancel-in-progress: true
-
 jobs:
   pre-commit:
     name: Pre-commit
@@ -31,7 +26,6 @@ jobs:
       source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
     secrets: inherit
-
   cargo-deps-redundancy:
     name: Cargo deps redundancy
     uses: ./.github/workflows/checks-cargo-deps.yaml
@@ -39,7 +33,6 @@ jobs:
       source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
     secrets: inherit
-
   audit:
     name: Audit
     uses: ./.github/workflows/checks-audit.yaml
@@ -47,7 +40,6 @@ jobs:
       source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
     secrets: inherit
-
   lint:
     name: Lint
     uses: ./.github/workflows/checks-lint.yaml
@@ -55,7 +47,6 @@ jobs:
       source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
     secrets: inherit
-
   zizmor:
     name: Zizmor
     uses: ./.github/workflows/checks-zizmor.yaml

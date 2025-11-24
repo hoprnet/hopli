@@ -1,4 +1,3 @@
----
 toolchain:
   - changed-files:
       - any-glob-to-any-file:
@@ -14,4 +13,3 @@ dependencies:
       - any-glob-to-any-file:
           - "Cargo.lock"
           - "**/Cargo.toml"
-

@@ -1,9 +1,7 @@
----
 #################################################################################
 # Manual pipeline to clean the cache of a given pull request
 #################################################################################
 name: Cleanup PR
-
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +9,6 @@ on:
         type: number
         required: true
         description: "Pull request number"
-
 jobs:
   cleanup-pr:
     name: Remove cache
@@ -23,13 +20,11 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           ref: master
-
       - name: Setup GCP
         id: gcp
         uses: hoprnet/hopr-workflows/actions/setup-gcp@12c56020e16036982e6cc529848edeedfc705865 # master
@@ -37,7 +32,6 @@ jobs:
           google-credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
           login-artifact-registry: 'true'
           install-sdk: 'true'
-
       - name: Cleanup Github pipeline cache
         run: |
           cacheKeysForPR=($(gh actions-cache list -R ${{ github.repository }} -B refs/pull/${{ github.event.inputs.pr_number }}/merge | cut -f 1 | tr '\n' ' '))

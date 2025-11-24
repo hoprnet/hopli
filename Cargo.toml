@@ -42,7 +42,9 @@ url = { version = "2.5.7", features = ["serde"] }
 
 hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "cc74253f4226fdca9f3ac4147e7ee0ac9b629c7c" }
 hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
-hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7", features = ["to-file"] }
+hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7", features = [
+  "to-file",
+] }
 hopr-crypto-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
 hopr-internal-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
 hopr-primitive-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }

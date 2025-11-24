@@ -1,10 +1,8 @@
----
 #################################################################################
 # Manual pipeline to close a HOPLI release
 # https://github.com/hoprnet/hoprnet/blob/master/.processes/release.md#close-release
 #################################################################################
 name: Close Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -28,7 +26,6 @@ on:
 concurrency:
   group: close-release
   cancel-in-progress: true
-
 jobs:
   close-release:
     name: Close Release
@@ -39,17 +36,14 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-
       - name: Install Nix
         uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
         if: ${{ !env.ACT }}
         with:
@@ -57,7 +51,6 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         env:
           USER: runner
-
       - name: Generate Changelog
         id: template
         run: |
@@ -74,7 +67,6 @@ jobs:
           cat docs/changelog/changelog-${current_version}.md
         env:
           GH_TOKEN: ${{ github.token }}
-
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
         with:
@@ -88,7 +80,6 @@ jobs:
           draft: true
           assignees: ${{ github.actor }}
           team-reviewers: "@hoprnet/hopr-development"
-
       - name: Enable Auto Merge
         run: |
           git fetch
@@ -97,7 +88,6 @@ jobs:
           gh pr ready
         env:
           GH_TOKEN: ${{ secrets.GH_RUNNER_TOKEN }}
-
       - name: Update next release type
         run: |
           gh variable set NEXT_RELEASE_TYPE --body "${{ github.event.inputs.next_release_type }}"

@@ -1,9 +1,7 @@
----
 #################################################################################
 # Manual pipeline to clone a docker image tag based on other docker image tag
 #################################################################################
 name: Publish Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -17,11 +15,9 @@ on:
         required: true
         description: "Target tag name"
         default: "stable"
-
 concurrency:
   group: publish-release
   cancel-in-progress: true
-
 jobs:
   publish-release:
     name: Publish Release
@@ -32,7 +28,6 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Setup GCP
         id: gcp
         uses: hoprnet/hopr-workflows/actions/setup-gcp@12c56020e16036982e6cc529848edeedfc705865 # master
@@ -40,7 +35,6 @@ jobs:
           google-credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
           login-artifact-registry: 'true'
           install-sdk: 'true'
-
       - name: Tag docker images with release name
         run: |
           images=(hopli)
