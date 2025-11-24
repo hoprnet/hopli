@@ -1,19 +1,14 @@
----
 name: Update flake.lock
-
 env:
   needs_nix_setup: true
-
 on:
   workflow_dispatch: # allows manual triggering
   schedule:
     - cron: "0 0 * * 0" # runs weekly on Sunday at 00:00
-
 permissions:
   contents: write
   issues: write
   pull-requests: write
-
 jobs:
   lockfile:
     runs-on: self-hosted-hoprnet-small
@@ -23,13 +18,11 @@ jobs:
         with:
           disable-sudo: false
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Install Nix
         if: env.needs_nix_setup == 'true'
         uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
         if: env.needs_nix_setup == 'true'
         with:
@@ -37,17 +30,14 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         env:
           USER: runner
-
       - name: Install NodeJS
         uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: 22.21.1
-
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-
       - name: Update flake.lock
         uses: DeterminateSystems/update-flake-lock@c5930b397a673a70ca70be06020e943aeac310a1 # v27
         id: update
@@ -57,7 +47,6 @@ jobs:
             dependencies
             automated
           token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure PR and mark as ready
         run: |
           gh pr edit ${{ steps.update.outputs.pull-request-number }} --add-assignee "@copilot"

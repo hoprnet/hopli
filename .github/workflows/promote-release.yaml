@@ -1,9 +1,7 @@
----
 #################################################################################
 # Manual pipeline to promote a release name to have its own branch
 #################################################################################
 name: Promote Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -19,11 +17,9 @@ on:
         type: string
         required: true
         description: 'Git tag from which the release branch fork (v3.0.0)'
-
 concurrency:
   group: promote-release
   cancel-in-progress: true
-
 jobs:
   promote_release:
     name: Promote Release
@@ -34,7 +30,6 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -42,7 +37,6 @@ jobs:
           persist-credentials: true # required for gh cli to do push
           token: ${{ secrets.GH_RUNNER_TOKEN }} # Needs to use a different token than GITHUB_TOKEN to be able to push to protected branches
           ref: master
-
       - name: Promote release
         id: promote_release
         run: |
@@ -67,7 +61,6 @@ jobs:
           gh variable set BRANCH_MASTER_RELEASE_NAME --body "${{ github.event.inputs.new_release_name }}"
         env:
           GH_TOKEN: ${{ secrets.GH_RUNNER_TOKEN }}
-
   new_release:
     name: Open new release
     needs:

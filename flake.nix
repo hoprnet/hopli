@@ -87,6 +87,10 @@
           depsSrc = nixLib.mkDepsSrc {
             root = ./.;
             inherit fs;
+            extraFiles = [
+              (fs.fileFilter (file: file.hasExt "sh") ./.ci)
+              (fs.fileFilter (file: file.hasExt "py") ./.ci)
+            ];
           };
           src = nixLib.mkSrc {
             root = ./.;

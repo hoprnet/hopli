@@ -1,9 +1,7 @@
----
 #################################################################################
 # Pipeline to package artifacts
 #################################################################################
 name: Package
-
 on:
   workflow_call:
     inputs:
@@ -25,15 +23,12 @@ on:
       workflow_run_id:
         required: true
         type: string
-
 concurrency:
   group: ${{ inputs.branch }}-package-${{ inputs.target }}-${{ inputs.packager }}
   cancel-in-progress: true
-
 permissions:
   contents: read
   actions: write
-
 jobs:
   package:
     name: Package
@@ -45,7 +40,6 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.branch }}
-
       - name: Setup GCP
         id: gcp
         uses: hoprnet/hopr-workflows/actions/setup-gcp@12c56020e16036982e6cc529848edeedfc705865 # master
@@ -53,7 +47,6 @@ jobs:
           google-credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
           login-artifact-registry: 'false'
           install-sdk: 'true'
-
       - name: Download artifacts from parent workflow run
         id: download
         run: |
@@ -94,7 +87,6 @@ jobs:
           architecture=${architecture%-linux}
           echo "package_file_name=hopli_${current_version}_${architecture}" | tee -a $GITHUB_OUTPUT
           echo "current_version=${current_version}" | tee -a $GITHUB_OUTPUT
-
       - name: Install packages
         run: |
           sudo apt-get update
@@ -106,14 +98,12 @@ jobs:
           fi
           curl -L -o nfpm.deb "$nfpm_url"
           sudo apt install -y ./nfpm.deb
-
       - name: Create man pages
         run: |
           help2man --name="HOPR node executable" --no-info --output ./deploy/nfpm/hopli.1 ./dist/bin/hopli
           gzip -9n ./deploy/nfpm/hopli.1
           help2man --name="HOPR CLI helper tool" --no-info --output ./deploy/nfpm/hopli.1 ./dist/bin/hopli
           gzip -9n ./deploy/nfpm/hopli.1
-
       - name: Create Changelog
         run: |
           ./.ci/scripts/generate-changelog.sh "${{ steps.download.outputs.current_version }}" "${{ inputs.packager }}" true > ./deploy/nfpm/changelog
@@ -122,15 +112,12 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Create package
         run: just package ${{ inputs.packager }} ${{ inputs.target }}
-
       - name: Create signatures
         run: just sign-file "${{ github.workspace }}/dist/packages/hopli-${{ inputs.target }}.${{ inputs.packager }}"
         env:
           GPG_HOPRNET_PRIVATE_KEY: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
-
       - name: Test package
         if: vars.TEST_OS_PACKAGE_ENABLED == 'true'
         timeout-minutes: 30
@@ -145,22 +132,18 @@ jobs:
           HOPLI_MODULE_ADDRESS: ${{ secrets.TEST_OS_PACKAGE_HOPLI_MODULE_ADDRESS }}
           HOPLI_PROVIDER: ${{ secrets.TEST_OS_PACKAGE_HOPLI_PROVIDER }}
           GCP_PROJECT: ${{ secrets.GOOGLE_HOPRASSOCIATION_PROJECT }}
-
       - name: Publish package
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ steps.download.outputs.package_file_name }}.${{ inputs.extension }}
           path: ${{ github.workspace }}/dist/packages/hopli-${{ inputs.target }}.${{ inputs.packager }}
-
       - name: Publish package hash
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ steps.download.outputs.package_file_name }}.${{ inputs.extension }}.sha256
           path: ${{ github.workspace }}/dist/packages/hopli-${{ inputs.target }}.${{ inputs.packager }}.sha256
-
       - name: Publish package signature
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ steps.download.outputs.package_file_name }}.${{ inputs.extension }}.asc
           path: ${{ github.workspace }}/dist/packages/hopli-${{ inputs.target }}.${{ inputs.packager }}.asc
-

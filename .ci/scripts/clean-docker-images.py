@@ -52,7 +52,12 @@ def list_docker_images(client, parent):
 
 async def delete_docker_images_list(images, dry_run):
     """Deletes a list of Docker images asynchronously."""
-    await asyncio.gather(*[asyncio.wait_for(delete_docker_image(img, dry_run), timeout=60) for img in images])
+    await asyncio.gather(
+        *[
+            asyncio.wait_for(delete_docker_image(img, dry_run), timeout=60)
+            for img in images
+        ]
+    )
 
 
 async def delete_docker_image(img, dry_run):
@@ -72,8 +77,19 @@ async def delete_docker_image(img, dry_run):
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Cleanup old Docker images.")
 parser.add_argument("registry", help="Docker image registry")
-parser.add_argument("-n", "--dry-run", action="store_true", help="Simulate the deletion without making any changes")
-parser.add_argument("-d", "--days", type=int, default=60, help="Number of days to consider an image old (default: 60)")
+parser.add_argument(
+    "-n",
+    "--dry-run",
+    action="store_true",
+    help="Simulate the deletion without making any changes",
+)
+parser.add_argument(
+    "-d",
+    "--days",
+    type=int,
+    default=60,
+    help="Number of days to consider an image old (default: 60)",
+)
 args = parser.parse_args()
 
 # Extract and validate command-line arguments
@@ -84,7 +100,9 @@ date = datetime.now(UTC) - timedelta(days=days)
 images = ["hopli", "hoprd"]
 
 # Example registry URL: europe-west3-docker.pkg.dev/my-project/my-repo
-registry_pattern = re.compile(r"^(?P<location>[a-z0-9-]+)-docker\.pkg\.dev/(?P<project>[^/]+)/(?P<repo>[^/]+)$")
+registry_pattern = re.compile(
+    r"^(?P<location>[a-z0-9-]+)-docker\.pkg\.dev/(?P<project>[^/]+)/(?P<repo>[^/]+)$"
+)
 match = registry_pattern.match(registry)
 
 if not match:
@@ -121,13 +139,21 @@ async def main():
     ]
 
     for image in images:
-        filtered_images = [img for img in old_images if img.uri.startswith(f"{registry}/{image}@")]
+        filtered_images = [
+            img for img in old_images if img.uri.startswith(f"{registry}/{image}@")
+        ]
         tagged_filtered_images = [img for img in filtered_images if len(img.tags) > 0]
-        untagged_filtered_images = [img for img in filtered_images if len(img.tags) == 0]
+        untagged_filtered_images = [
+            img for img in filtered_images if len(img.tags) == 0
+        ]
 
         print(f"Found {len(filtered_images)} old images for {image} in {registry}")
-        print(f"Found {len(tagged_filtered_images)} tagged images for {image} in {registry}")
-        print(f"Found {len(untagged_filtered_images)} untagged images for {image} in {registry}")
+        print(
+            f"Found {len(tagged_filtered_images)} tagged images for {image} in {registry}"
+        )
+        print(
+            f"Found {len(untagged_filtered_images)} untagged images for {image} in {registry}"
+        )
         for batch in itertools.batched(tagged_filtered_images, 20):
             await delete_docker_images_list(batch, dry_run)
         for batch in itertools.batched(untagged_filtered_images, 20):

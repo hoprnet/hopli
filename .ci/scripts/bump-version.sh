@@ -23,10 +23,6 @@ mydir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 new_version="${1}"
 
-# Update hopr-lib Rust manifest
-sed -i'.original' 's/^version = ".*"$/version = "'${new_version}'"/' ${mydir}/../hopr/hopr-lib/Cargo.toml
-rm ${mydir}/../hopr/hopr-lib/Cargo.toml.original
-
-# Update hoprd Rust manifest
-sed -i'.original' 's/^version = ".*"$/version = "'${new_version}'"/' ${mydir}/../hoprd/hoprd/Cargo.toml
-rm ${mydir}/../hoprd/hoprd/Cargo.toml.original
+# Update hopli Rust manifest
+sed -i'.original' 's/^version = ".*"$/version = "'${new_version}'"/' ${mydir}/../../Cargo.toml
+rm ${mydir}/../../Cargo.toml.original
