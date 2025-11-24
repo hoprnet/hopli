@@ -100,7 +100,7 @@ jobs:
 
       - name: Run unit tests with nightly
         run: |
-          nix build -L .#hopr-test-nightly
+          nix build -L .#test-unit-nightly
 
   build-candidate-binaries:
     name: Build Candidate Binaries

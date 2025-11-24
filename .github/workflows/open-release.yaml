@@ -72,8 +72,8 @@ jobs:
       - name: Bump Version
         id: bump
         run: |
-          next_version=$(./scripts/get-next-version.sh ${{ steps.vars.outputs.release_type }})
-          ./scripts/bump-version.sh ${next_version}
+          next_version=$(./.ci/scripts/get-next-version.sh ${{ steps.vars.outputs.release_type }})
+          ./.ci/scripts/bump-version.sh ${next_version}
           echo "next_version=${next_version}" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
