@@ -96,7 +96,7 @@ jobs:
           fi
           declare docker_tag docker_tag_pr docker_release_latest_tag
           if [ "${GITHUB_PR_LABEL_RELEASE:-0}" == '1' ]; then
-            docker_tag=$(./scripts/get-current-version.sh docker)
+            docker_tag=$(./.ci/scripts/get-current-version.sh docker)
             docker_tag_pr=${docker_tag}-pr.${{ github.event.pull_request.number }}
             echo "DOCKER_TAG=${docker_tag}" >> $GITHUB_OUTPUT
             echo "DOCKER_TAG_PR=${docker_tag_pr}" >> $GITHUB_OUTPUT
@@ -109,8 +109,8 @@ jobs:
             else
               export COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
             fi
-            next_version=$(./scripts/get-next-version.sh Build)
-            ./scripts/bump-version.sh ${next_version}
+            next_version=$(./.ci/scripts/get-next-version.sh Build)
+            ./.ci/scripts/bump-version.sh ${next_version}
             docker_tag=$(echo "${next_version}" | sed 's/+/-/')
             docker_tag_pr=$(echo "${next_version}" | sed 's/+.*/-pr.'${{ github.event.pull_request.number }}'/')
             echo "DOCKER_TAG=${docker_tag}" >> $GITHUB_OUTPUT
