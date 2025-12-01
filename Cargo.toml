@@ -1,8 +1,16 @@
 [package]
 name = "hopli"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 license = "GPL-3.0-only"
+
+[lib]
+name = "hopli_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hopli"
+path = "src/main.rs"
 
 [features]
 default = []
@@ -42,7 +50,9 @@ url = { version = "2.5.7", features = ["serde"] }
 
 hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "cc74253f4226fdca9f3ac4147e7ee0ac9b629c7c" }
 hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
-hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7", features = ["to-file"] }
+hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7", features = [
+  "to-file",
+] }
 hopr-crypto-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
 hopr-internal-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
 hopr-primitive-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }

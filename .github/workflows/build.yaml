@@ -1,9 +1,7 @@
----
 ################################################################################
 # Main pipeline to build hoprnet artifacts
 ################################################################################
 name: Build
-
 on:
   merge_group:
     types: [checks_requested]
@@ -14,16 +12,13 @@ on:
       - reopened
       - review_requested
       - synchronize
-
 permissions:
   contents: write
   actions: write
   security-events: write
-
 concurrency:
   group: ${{ github.event.pull_request.head.ref || github.ref_name }}-build
   cancel-in-progress: true
-
 jobs:
   build-docker:
     strategy:
@@ -38,7 +33,6 @@ jobs:
       package: ${{ matrix.package }}
       production: false
     secrets: inherit
-
   build-binaries:
     strategy:
       fail-fast: false
@@ -63,7 +57,6 @@ jobs:
       runner: ${{ matrix.target.runner }}
       target: ${{ matrix.target.name }}
     secrets: inherit
-
   package:
     name: ${{ matrix.target.arch }}-${{ matrix.packager.package }}
     needs: build-binaries
@@ -82,8 +75,6 @@ jobs:
             extension: rpm
           - package: archlinux
             extension: pkg.tar.zst
-
-
     uses: ./.github/workflows/package.yaml
     with:
       runner: ${{ matrix.target.runner }}
@@ -93,7 +84,6 @@ jobs:
       extension: ${{ matrix.packager.extension }}
       workflow_run_id: ${{ github.run_id }}
     secrets: inherit
-
   docs:
     name: Docs
     uses: ./.github/workflows/build-docs.yaml

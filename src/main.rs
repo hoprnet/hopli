@@ -1,25 +1,14 @@
 //! `hopli` is a collection of commands to help with identity creation, funding, registration, etc. for HOPR nodes
 
 use clap::{Parser, Subcommand};
-use tracing_subscriber::layer::SubscriberExt;
-
-use crate::{
+use hopli_lib::{
     faucet::FaucetArgs,
     identity::IdentitySubcommands,
     safe_module::SafeModuleSubcommands,
     utils::{Cmd, HelperErrors},
     win_prob::WinProbSubcommands,
 };
-mod constants;
-pub mod environment_config;
-pub mod faucet;
-pub mod identity;
-pub mod key_pair;
-pub mod methods;
-pub mod safe_module;
-#[allow(clippy::too_many_arguments)]
-pub mod utils;
-pub mod win_prob;
+use tracing_subscriber::layer::SubscriberExt;
 
 // Avoid musl's default allocator due to degraded performance
 //

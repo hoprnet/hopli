@@ -1,6 +1,4 @@
----
 name: Audit
-
 on:
   merge_group:
     types: [checks_requested]
@@ -12,11 +10,9 @@ on:
       source_branch:
         required: true
         type: string
-
 concurrency:
   group: ${{ inputs.source_branch || github.ref_name }}-audit
   cancel-in-progress: true
-
 jobs:
   cargo-audit:
     name: Audit
@@ -27,13 +23,11 @@ jobs:
         with:
           disable-sudo: true
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_branch }}
-
       - name: Run Audit
         run: nix run .#audit

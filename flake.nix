@@ -83,10 +83,14 @@
             rustToolchainFile = ./rust-toolchain.toml;
             useRustNightly = true;
           };
-        # Use nix-lib's source filtering for better rebuild performance
+          # Use nix-lib's source filtering for better rebuild performance
           depsSrc = nixLib.mkDepsSrc {
             root = ./.;
             inherit fs;
+            extraFiles = [
+              (fs.fileFilter (file: file.hasExt "sh") ./.ci)
+              (fs.fileFilter (file: file.hasExt "py") ./.ci)
+            ];
           };
           src = nixLib.mkSrc {
             root = ./.;
@@ -163,15 +167,7 @@
               src = testSrc;
               runTests = true;
               cargoExtraArgs = "--lib";
-            }
-          );
 
-          test-unit-nightly = rust-builder-local-nightly.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs
-            // {
-              src = testSrc;
-              runTests = true;
-              cargoExtraArgs = "-Z panic-abort-tests";
             }
           );
 
@@ -179,7 +175,7 @@
           hopli-man = nixLib.mkManPage {
             pname = "hopli";
             binary = hopli-dev;
-            description = "HOPR CLI helper tool";
+            description = "Hopli CLI helper tool";
           };
 
           # FIXME: the docker image built is not working on macOS arm platforms
@@ -284,7 +280,7 @@
           # Development shells using nix-lib
           devShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR Development";
+            shellName = "Hopli Development";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -293,6 +289,7 @@
               foundry-bin
               nfpm
               envsubst
+              just
             ];
             shellHook = ''
               ${pre-commit-check.shellHook}
@@ -301,7 +298,7 @@
 
           ciShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR CI";
+            shellName = "Hopli CI";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -320,7 +317,7 @@
 
           testShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR Testing";
+            shellName = "Hopli Testing";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -337,7 +334,7 @@
 
           ciTestDevShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR CI Test (Dev)";
+            shellName = "Hopli CI Test (Dev)";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -351,7 +348,7 @@
 
           ciTestShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR CI Test (Candidate)";
+            shellName = "Hopli CI Test (Candidate)";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -365,7 +362,7 @@
 
           docsShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "HOPR Documentation";
+            shellName = "Hopli Documentation";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
@@ -373,6 +370,20 @@
               pandoc
               sqlite
               cargo-machete
+            ];
+            shellHook = ''
+              ${pre-commit-check.shellHook}
+            '';
+            rustToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
+          };
+
+          nightlyShell = nixLib.mkDevShell {
+            rustToolchainFile = ./rust-toolchain.toml;
+            shellName = "Hopli Nightly";
+            treefmtWrapper = config.treefmt.build.wrapper;
+            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
+            extraPackages = with pkgs; [
+              foundry-bin
             ];
             shellHook = ''
               ${pre-commit-check.shellHook}
@@ -515,7 +526,7 @@
               hopli-profile-docker
               ;
             inherit hopli-candidate;
-            inherit test-unit test-unit-nightly;
+            inherit test-unit;
             inherit docs;
             inherit pre-commit-check;
             inherit hopli-man;
@@ -535,6 +546,7 @@
           devShells.citest = ciTestShell;
           devShells.citestdev = ciTestDevShell;
           devShells.docs = docsShell;
+          devShells.nightly = nightlyShell;
 
           formatter = config.treefmt.build.wrapper;
         };
