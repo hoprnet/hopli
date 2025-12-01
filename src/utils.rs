@@ -39,7 +39,8 @@ use tracing::debug;
 
 use crate::constants::{
     ERC_1820_DEPLOYER, ERC_1820_REGISTRY_DEPLOY_CODE, ETH_VALUE_FOR_ERC1820_DEPLOYER, INIT_KEY_BINDING_FEE,
-    MULTICALL3_DEPLOY_CODE,
+    MULTICALL3_DEPLOY_CODE, SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE, SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE,
+    SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE, SAFE_SINGLETON_DEPLOY_CODE,
 };
 
 pub trait Cmd: clap::Parser + Sized {
@@ -768,7 +769,7 @@ where
             provider.send_transaction(tx).await?.watch().await?;
 
             let tx_receipt = provider
-                .send_raw_transaction(&crate::constants::SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE)
+                .send_raw_transaction(&SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE)
                 .await?
                 .get_receipt()
                 .await?;
@@ -781,20 +782,20 @@ where
             // 1. Safe proxy factory deploySafeProxyFactory();
             let _tx_safe_proxy_factory = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(crate::constants::SAFE_PROXY_FACTORY_DEPLOY_CODE);
+                .with_input(SAFE_PROXY_FACTORY_DEPLOY_CODE);
 
             // 2. Handler: only CompatibilityFallbackHandler and omit TokenCallbackHandler as it's not used now
             let _tx_safe_compatibility_fallback_handler = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(crate::constants::SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE);
+                .with_input(SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE);
             // 3. Library: only MultiSendCallOnly and omit MultiSendCall
             let _tx_safe_multisend_call_only = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(crate::constants::SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE);
+                .with_input(SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE);
             // 4. Safe singleton deploySafe();
             let _tx_safe_singleton = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(crate::constants::SAFE_SINGLETON_DEPLOY_CODE);
+                .with_input(SAFE_SINGLETON_DEPLOY_CODE);
             // other omitted libs: SimulateTxAccessor, CreateCall, and SignMessageLib
             // broadcast those transactions
             provider.send_transaction(_tx_safe_proxy_factory).await?.watch().await?;
