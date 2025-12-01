@@ -1,7 +1,3 @@
-#################################################################################
-# Manual pipeline to close a HOPLI release
-# https://github.com/hoprnet/hoprnet/blob/master/.processes/release.md#close-release
-#################################################################################
 name: Close Release
 on:
   workflow_dispatch:
