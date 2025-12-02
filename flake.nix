@@ -285,6 +285,25 @@
             '';
           };
 
+          ciShell = nixLib.mkDevShell {
+            rustToolchainFile = ./rust-toolchain.toml;
+            shellName = "Hopli CI";
+            treefmtWrapper = config.treefmt.build.wrapper;
+            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
+            extraPackages = with pkgs; [
+              act
+              gh
+              google-cloud-sdk
+              cargo-machete
+              graphviz
+              swagger-codegen3
+              vacuum-go
+              zizmor
+              gnupg
+              perl
+            ];
+          };
+
           docsShell = nixLib.mkDevShell {
             rustToolchainFile = ./rust-toolchain.toml;
             shellName = "Hopli Documentation";
@@ -457,6 +476,7 @@
           };
 
           devShells.default = devShell;
+          devShells.ci = ciShell;
           devShells.docs = docsShell;
           devShells.nightly = nightlyShell;
 
