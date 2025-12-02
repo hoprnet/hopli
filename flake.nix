@@ -161,16 +161,6 @@
                 hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
               );
 
-          test-unit = rust-builder-local.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs
-            // {
-              src = testSrc;
-              runTests = true;
-              cargoExtraArgs = "--lib";
-
-            }
-          );
-
           # Man pages using nix-lib
           hopli-man = nixLib.mkManPage {
             pname = "hopli";
@@ -284,7 +274,6 @@
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
-              sqlite
               cargo-machete
               foundry-bin
               nfpm
@@ -307,57 +296,10 @@
               google-cloud-sdk
               cargo-machete
               graphviz
-              swagger-codegen3
-              vacuum-go
               zizmor
               gnupg
               perl
             ];
-          };
-
-          testShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli Testing";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              uv
-              python313
-              foundry-bin
-            ];
-            shellHook = ''
-              uv sync --frozen
-              unset SOURCE_DATE_EPOCH
-              ${pkgs.lib.optionalString pkgs.stdenv.isLinux "autoPatchelf ./.venv"}
-            '';
-          };
-
-          ciTestDevShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli CI Test (Dev)";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              foundry-bin
-              hopli-dev
-            ];
-            shellHook = ''
-              unset SOURCE_DATE_EPOCH
-            '';
-          };
-
-          ciTestShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli CI Test (Candidate)";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              foundry-bin
-              hopli-candidate
-            ];
-            shellHook = ''
-              unset SOURCE_DATE_EPOCH
-            '';
           };
 
           docsShell = nixLib.mkDevShell {
@@ -416,14 +358,6 @@
             };
           };
 
-          find-port-ci = flake-utils.lib.mkApp {
-            drv = pkgs.writeShellApplication {
-              name = "find-port";
-              text = ''
-                ${pkgs.python3}/bin/python ./tests/find_port.py --min-port 3000 --max-port 4000 --skip 30
-              '';
-            };
-          };
           update-github-labels = flake-utils.lib.mkApp {
             drv = pkgs.writeShellScriptBin "update-github-labels" ''
               set -eu
@@ -512,7 +446,7 @@
             inherit hopli-docker-build-and-upload;
             inherit hopli-dev-docker-build-and-upload;
             inherit hopli-profile-docker-build-and-upload;
-            inherit update-github-labels find-port-ci;
+            inherit update-github-labels;
             check = run-check;
             audit = run-audit;
           };
@@ -526,7 +460,6 @@
               hopli-profile-docker
               ;
             inherit hopli-candidate;
-            inherit test-unit;
             inherit docs;
             inherit pre-commit-check;
             inherit hopli-man;
@@ -542,9 +475,6 @@
 
           devShells.default = devShell;
           devShells.ci = ciShell;
-          devShells.test = testShell;
-          devShells.citest = ciTestShell;
-          devShells.citestdev = ciTestDevShell;
           devShells.docs = docsShell;
           devShells.nightly = nightlyShell;
 
