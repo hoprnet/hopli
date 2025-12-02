@@ -283,8 +283,8 @@ hopli safe-module create --network ${HOPRD_NETWORK} --contracts-root "./ethereum
 hopli identity read --identity-directory "./new_identities" --identity-prefix nodes_
 ```
 
-
 ## `flake` environment
+
 ### Documentation
 
 ```
