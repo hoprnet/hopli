@@ -161,16 +161,6 @@
                 hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
               );
 
-          test-unit = rust-builder-local.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs
-            // {
-              src = testSrc;
-              runTests = true;
-              cargoExtraArgs = "--lib";
-
-            }
-          );
-
           # Man pages using nix-lib
           hopli-man = nixLib.mkManPage {
             pname = "hopli";
@@ -284,7 +274,6 @@
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
-              sqlite
               cargo-machete
               foundry-bin
               nfpm
@@ -293,70 +282,6 @@
             ];
             shellHook = ''
               ${pre-commit-check.shellHook}
-            '';
-          };
-
-          ciShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli CI";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              act
-              gh
-              google-cloud-sdk
-              cargo-machete
-              graphviz
-              swagger-codegen3
-              vacuum-go
-              zizmor
-              gnupg
-              perl
-            ];
-          };
-
-          testShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli Testing";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              uv
-              python313
-              foundry-bin
-            ];
-            shellHook = ''
-              uv sync --frozen
-              unset SOURCE_DATE_EPOCH
-              ${pkgs.lib.optionalString pkgs.stdenv.isLinux "autoPatchelf ./.venv"}
-            '';
-          };
-
-          ciTestDevShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli CI Test (Dev)";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              foundry-bin
-              hopli-dev
-            ];
-            shellHook = ''
-              unset SOURCE_DATE_EPOCH
-            '';
-          };
-
-          ciTestShell = nixLib.mkDevShell {
-            rustToolchainFile = ./rust-toolchain.toml;
-            shellName = "Hopli CI Test (Candidate)";
-            treefmtWrapper = config.treefmt.build.wrapper;
-            treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              foundry-bin
-              hopli-candidate
-            ];
-            shellHook = ''
-              unset SOURCE_DATE_EPOCH
             '';
           };
 
@@ -414,30 +339,6 @@
                 cargo audit
               '';
             };
-          };
-
-          find-port-ci = flake-utils.lib.mkApp {
-            drv = pkgs.writeShellApplication {
-              name = "find-port";
-              text = ''
-                ${pkgs.python3}/bin/python ./tests/find_port.py --min-port 3000 --max-port 4000 --skip 30
-              '';
-            };
-          };
-          update-github-labels = flake-utils.lib.mkApp {
-            drv = pkgs.writeShellScriptBin "update-github-labels" ''
-              set -eu
-              # remove existing crate entries (to remove old crates)
-              yq 'with_entries(select(.key != "crate:*"))' .github/labeler.yml > labeler.yml.new
-              # add new crate entries for known crates
-              for f in `find . -mindepth 2 -name "Cargo.toml" -type f -printf '%P\n'`; do
-              	env \
-              		name="crate:`yq '.package.name' $f`" \
-              		dir="`dirname $f`/**" \
-              		yq -n '.[strenv(name)][0]."changed-files"[0]."any-glob-to-any-file" = env(dir)' >> labeler.yml.new
-              done
-              mv labeler.yml.new .github/labeler.yml
-            '';
           };
         in
         {
@@ -512,7 +413,6 @@
             inherit hopli-docker-build-and-upload;
             inherit hopli-dev-docker-build-and-upload;
             inherit hopli-profile-docker-build-and-upload;
-            inherit update-github-labels find-port-ci;
             check = run-check;
             audit = run-audit;
           };
@@ -526,7 +426,6 @@
               hopli-profile-docker
               ;
             inherit hopli-candidate;
-            inherit test-unit;
             inherit docs;
             inherit pre-commit-check;
             inherit hopli-man;
@@ -541,10 +440,6 @@
           };
 
           devShells.default = devShell;
-          devShells.ci = ciShell;
-          devShells.test = testShell;
-          devShells.citest = ciTestShell;
-          devShells.citestdev = ciTestDevShell;
           devShells.docs = docsShell;
           devShells.nightly = nightlyShell;
 
