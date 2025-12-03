@@ -27,7 +27,7 @@ use tracing::{debug, info};
 use crate::{
     environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, PrivateKeyArgs},
-    utils::{Cmd, HelperErrors, a2h},
+    utils::{Cmd, HelperErrors},
 };
 
 /// CLI arguments for `hopli win-prob`
@@ -72,7 +72,7 @@ impl WinProbSubcommands {
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_win_prob = HoprWinningProbabilityOracle::new(
-            a2h(contract_addresses.addresses.winning_probability_oracle),
+            contract_addresses.addresses.winning_probability_oracle,
             rpc_provider.clone(),
         );
 
@@ -102,7 +102,7 @@ impl WinProbSubcommands {
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_win_prob = HoprWinningProbabilityOracle::new(
-            a2h(contract_addresses.addresses.winning_probability_oracle),
+            contract_addresses.addresses.winning_probability_oracle,
             rpc_provider.clone(),
         );
 

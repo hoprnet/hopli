@@ -1,47 +1,30 @@
 //! This module contains definiation of arguments that specify the environment
 //! and networks that a HOPR node runs in.
 //!
-//! [EnvironmentType] defines the environment type. EnvironmentType of a network is defined in
-//! `contracts-addresses.json` under the foundry contract root. Different environment type uses
-//! a different foundry profile.
-//!
 //! Network is a collection of several major/minor releases.
-//!
-//! [NetworkDetail] specifies the environment type of the network, the starting block number, and
-//! the deployed contract addresses in [ContractAddresses]
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use hopr_bindings::exports::alloy::{
-    network::EthereumWallet,
-    providers::{
-        Identity, ProviderBuilder, RootProvider,
-        fillers::{
-            BlobGasFiller, CachedNonceManager, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
-            WalletFiller,
+use hopr_bindings::{
+    exports::alloy::{
+        network::EthereumWallet,
+        providers::{
+            Identity, ProviderBuilder, RootProvider,
+            fillers::{
+                BlobGasFiller, CachedNonceManager, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
+                WalletFiller,
+            },
         },
-    },
-    rpc::client::ClientBuilder,
-    signers::local::PrivateKeySigner,
-    transports::http::ReqwestTransport,
+        rpc::client::ClientBuilder,
+        signers::local::PrivateKeySigner,
+        transports::http::ReqwestTransport,
+    }, 
+    config::SingleNetworkContractAddresses
 };
-use hopr_chain_types::ContractAddresses;
 use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
 
 use crate::utils::HelperErrors;
-
-/// Types of HOPR network environments.
-#[derive(Debug, Copy, Clone, Deserialize, Serialize, Eq, PartialEq, strum::Display, strum::EnumString)]
-#[serde(rename_all(deserialize = "lowercase"))]
-#[strum(serialize_all = "lowercase")]
-pub enum EnvironmentType {
-    Production,
-    Staging,
-    Development,
-    Local,
-}
 
 type SharedFillerChain = JoinFill<
     JoinFill<JoinFill<JoinFill<Identity, ChainIdFiller>, NonceFiller<CachedNonceManager>>, GasFiller>,
@@ -50,25 +33,11 @@ type SharedFillerChain = JoinFill<
 pub type RpcProvider = FillProvider<JoinFill<SharedFillerChain, WalletFiller<EthereumWallet>>, RootProvider>;
 pub type RpcProviderWithoutSigner = FillProvider<SharedFillerChain, RootProvider>;
 
-// replace NetworkConfig with ProtocolConfig
-#[serde_as]
-#[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct NetworkDetail {
-    /// block number to start the indexer from
-    pub indexer_start_block_number: u32,
-    /// Type of environment
-    #[serde_as(as = "DisplayFromStr")]
-    pub environment_type: EnvironmentType,
-    /// contract addresses used by the network
-    pub addresses: ContractAddresses,
-}
-
 /// mapping of networks with its details
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     // #[serde(flatten)]
-    networks: HashMap<String, NetworkDetail>,
+    networks: BTreeMap<String, SingleNetworkContractAddresses>,
 }
 
 /// Arguments for getting network and ethereum RPC provider.
@@ -82,15 +51,13 @@ pub struct NetworkProviderArgs {
     #[clap(help = "Network name. E.g. monte_rosa", long, short)]
     network: String,
 
-    /// Path to the root of foundry project (ethereum/contracts), where all the contracts and
-    /// `contracts-addresses.json` are stored Default to "./ethereum/contracts", which is the path to the
-    /// `contracts` folder from the root of monorepo
+    /// Path to the files storing contract addresses (`contracts-addresses.json`). 
+    /// If not provided, uses embedded configuration from hopr-bindings dependency.
     #[clap(
         env = "HOPLI_CONTRACTS_ROOT",
-        help = "Specify path pointing to the contracts root",
+        help = "Specify path pointing to the contracts root (optional, defaults to embedded config)",
         long,
-        short,
-        default_value = "./ethereum/contracts"
+        short
     )]
     contracts_root: Option<String>,
 
@@ -103,28 +70,32 @@ impl Default for NetworkProviderArgs {
     fn default() -> Self {
         Self {
             network: "anvil-localhost".into(),
-            contracts_root: Some("./ethereum/contracts".into()),
+            contracts_root: None,
             provider_url: "http://127.0.0.1:8545".into(),
         }
     }
 }
 
 impl NetworkProviderArgs {
-    /// Get the NetworkDetail (contract addresses, environment type) from network names
-    pub fn get_network_details_from_name(&self) -> Result<NetworkDetail, HelperErrors> {
-        // read `contracts-addresses.json` at make_root_dir_path
-        let contract_root = self.contracts_root.to_owned().unwrap_or(
-            NetworkProviderArgs::default()
-                .contracts_root
-                .ok_or(HelperErrors::UnableToSetFoundryRoot)?,
-        );
-        let contract_environment_config_path =
-            PathBuf::from(OsStr::new(&contract_root)).join("contracts-addresses.json");
+    /// Get the network details (contract addresses, chain id) from network names
+    pub fn get_network_details_from_name(&self) -> Result<SingleNetworkContractAddresses, HelperErrors> {
+        // If contracts_root is provided, read from the local file
+        // Otherwise, use the embedded configuration from hopr_bindings
+        let network_config = if let Some(contract_root) = &self.contracts_root {
+            let contract_environment_config_path =
+                PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
 
-        let file_read =
-            std::fs::read_to_string(contract_environment_config_path).map_err(HelperErrors::UnableToReadFromPath)?;
+            let file_read = std::fs::read_to_string(contract_environment_config_path)
+                .map_err(HelperErrors::UnableToReadFromPath)?;
 
-        let network_config = serde_json::from_str::<NetworkConfig>(&file_read).map_err(HelperErrors::SerdeJson)?;
+            serde_json::from_str::<NetworkConfig>(&file_read).map_err(HelperErrors::SerdeJson)?
+        } else {
+            // Use embedded configuration from hopr_bindings
+            let networks_with_addresses = hopr_bindings::config::NetworksWithContractAddresses::default();
+            NetworkConfig {
+                networks: networks_with_addresses.networks,
+            }
+        };
 
         network_config
             .networks
@@ -191,18 +162,6 @@ impl NetworkProviderArgs {
     }
 }
 
-/// ensures that the network and environment_type exist
-/// in `contracts-addresses.json` and are matched
-pub fn ensure_environment_and_network_are_set(network: &str, environment_type: &str) -> Result<bool, HelperErrors> {
-    let network_detail = hopr_bindings::config::NetworksWithContractAddresses::default()
-        .networks
-        .get(network)
-        .cloned()
-        .ok_or_else(|| HelperErrors::UnknownNetwork)?;
-
-    Ok(network_detail.environment_type.to_string() == environment_type)
-}
-
 #[cfg(test)]
 mod tests {
     use hopr_bindings::exports::alloy::{
@@ -228,28 +187,6 @@ mod tests {
             anvil = anvil.port(8545u16);
         }
         anvil.spawn()
-    }
-
-    #[test]
-    fn read_anvil_localhost_at_right_path() -> anyhow::Result<()> {
-        let network = "anvil-localhost";
-        let environment_type = "local";
-        assert!(ensure_environment_and_network_are_set(network, environment_type)?);
-        Ok(())
-    }
-
-    #[test]
-    fn read_non_existing_environment_at_right_path() -> anyhow::Result<()> {
-        assert!(ensure_environment_and_network_are_set("non-existing", "development").is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn read_wrong_type_at_right_path() -> anyhow::Result<()> {
-        let network = "anvil-localhost";
-        let environment_type = "production";
-        assert!(!ensure_environment_and_network_are_set(network, environment_type)?);
-        Ok(())
     }
 
     #[tokio::test]
