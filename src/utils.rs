@@ -3,12 +3,14 @@
 use std::str::FromStr;
 
 use SafeContract::SafeContractInstance;
+use hex_literal::hex;
 use hopr_bindings::{
     exports::alloy::{
         self,
         contract::{Error as ContractError, Result as ContractResult},
         hex::FromHexError,
         network::{ReceiptResponse, TransactionBuilder},
+        node_bindings::{Anvil, AnvilInstance},
         primitives::{self, Address, Bytes, U256, address, aliases, keccak256},
         providers::{MULTICALL3_ADDRESS, MulticallError, PendingTransactionError},
         rpc::types::TransactionRequest,
@@ -22,6 +24,9 @@ use hopr_bindings::{
     hopr_channels::{HoprChannels, HoprChannels::HoprChannelsInstance},
     hopr_node_management_module::{
         HoprNodeManagementModule, HoprNodeManagementModule::HoprNodeManagementModuleInstance,
+    },
+    hopr_node_safe_migration::{
+        HoprNodeSafeMigration, HoprNodeSafeMigration::HoprNodeSafeMigrationInstance,
     },
     hopr_node_safe_registry::{HoprNodeSafeRegistry, HoprNodeSafeRegistry::HoprNodeSafeRegistryInstance},
     hopr_node_stake_factory::{HoprNodeStakeFactory, HoprNodeStakeFactory::HoprNodeStakeFactoryInstance},
@@ -37,11 +42,7 @@ use hopr_crypto_types::{keypairs::ChainKeypair, prelude::Keypair};
 use thiserror::Error;
 use tracing::debug;
 
-use crate::constants::{
-    ERC_1820_DEPLOYER, ERC_1820_REGISTRY_DEPLOY_CODE, ETH_VALUE_FOR_ERC1820_DEPLOYER, INIT_KEY_BINDING_FEE,
-    MULTICALL3_DEPLOY_CODE, SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE, SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE,
-    SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE, SAFE_SINGLETON_DEPLOY_CODE,
-};
+use crate::constants::*;
 
 pub trait Cmd: clap::Parser + Sized {
     fn run(self) -> Result<(), HelperErrors>;
@@ -193,13 +194,14 @@ pub struct ContractInstances<P> {
     pub win_prob_oracle: HoprWinningProbabilityOracleInstance<P>,
     pub stake_factory: HoprNodeStakeFactoryInstance<P>,
     pub module_implementation: HoprNodeManagementModuleInstance<P>,
+    pub node_safe_migration: HoprNodeSafeMigrationInstance<P>,
 }
 
 impl<P> ContractInstances<P>
 where
     P: alloy::providers::Provider + Clone,
 {
-    pub fn new(contract_addresses: &ContractAddresses, provider: P, _use_dummy_nr: bool) -> Self {
+    pub fn new(contract_addresses: &ContractAddresses, provider: P) -> Self {
         Self {
             token: HoprTokenInstance::new(a2h(contract_addresses.token), provider.clone()),
             channels: HoprChannelsInstance::new(a2h(contract_addresses.channels), provider.clone()),
@@ -224,52 +226,153 @@ where
                 a2h(contract_addresses.module_implementation),
                 provider.clone(),
             ),
+            node_safe_migration: HoprNodeSafeMigrationInstance::new(
+                a2h(contract_addresses.node_safe_migration),
+                provider.clone(),
+            ),
         }
     }
 
-    /// Deploys testing environment (with dummy network registry proxy) via the given provider.
-    async fn inner_deploy_common_contracts_for_testing(provider: P, deployer: &ChainKeypair) -> ContractResult<Self> {
-        {
-            debug!("deploying ERC1820 registry...");
-            // Fund 1820 deployer and deploy ERC1820Registry
-            let tx = TransactionRequest::default()
-                .with_to(ERC_1820_DEPLOYER)
-                .with_value(ETH_VALUE_FOR_ERC1820_DEPLOYER);
+    pub async fn deploy_erc1820_registry(provider: P) -> ContractResult<()> {
+        debug!("deploying ERC1820 registry...");
+        // Fund 1820 deployer and deploy ERC1820Registry
+        let tx = TransactionRequest::default()
+            .with_to(ERC_1820_DEPLOYER)
+            .with_value(ETH_VALUE_FOR_ERC1820_DEPLOYER);
 
+        // Sequentially executing the following transactions:
+        // 1. Fund the deployer wallet
+        provider.send_transaction(tx.clone()).await?.watch().await?;
+        // 2. Use the funded deployer wallet to deploy ERC1820Registry with a signed txn
+        provider
+            .send_raw_transaction(&ERC_1820_REGISTRY_DEPLOY_CODE)
+            .await?
+            .watch()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn deploy_multicall3(provider: P) -> ContractResult<()> {
+        debug!("deploying Multicall3...");
+        // Fund Multicall3 deployer and deploy Multicall3
+        let multicall3_code = provider.get_code_at(MULTICALL3_ADDRESS).await?;
+        if multicall3_code.is_empty() {
+            // Fund Multicall3 deployer and deploy ERC1820Registry
+            let tx = TransactionRequest::default()
+                .with_to(crate::constants::MULTICALL3_DEPLOYER)
+                .with_value(crate::constants::ETH_VALUE_FOR_MULTICALL3_DEPLOYER);
             // Sequentially executing the following transactions:
             // 1. Fund the deployer wallet
             provider.send_transaction(tx.clone()).await?.watch().await?;
-            // 2. Use the funded deployer wallet to deploy ERC1820Registry with a signed txn
+            // 2. Use the funded deployer wallet to deploy Multicall3 with a signed txn
             provider
-                .send_raw_transaction(&ERC_1820_REGISTRY_DEPLOY_CODE)
+                .send_raw_transaction(MULTICALL3_DEPLOY_CODE)
                 .await?
                 .watch()
                 .await?;
         }
+        Ok(())
+    }
 
-        {
-            debug!("deploying Multicall3...");
-            // Fund Multicall3 deployer and deploy Multicall3
-            let multicall3_code = provider.get_code_at(MULTICALL3_ADDRESS).await?;
-            if multicall3_code.is_empty() {
-                // Fund Multicall3 deployer and deploy ERC1820Registry
+    pub async fn deploy_safe_suites(provider: P) -> ContractResult<()> {
+        debug!("deploying Safe contracts...");
+
+        // Check if safe suite has been deployed. If so, skip this step
+        let code = provider
+            .get_code_at(SAFE_SINGLETON_ADDRESS)
+            .await?;
+        // .map_err(|e| ContractError::MiddlewareError { e })?;
+
+        // only deploy contracts when needed
+        if code.is_empty() {
+            debug!("deploying safe code");
+            // Deploy Safe diamond deployment proxy singleton
+            let safe_diamond_proxy_address = {
+                // Fund Safe singleton deployer 0.01 anvil-eth and deploy Safe singleton
                 let tx = TransactionRequest::default()
-                    .with_to(crate::constants::MULTICALL3_DEPLOYER)
-                    .with_value(crate::constants::ETH_VALUE_FOR_MULTICALL3_DEPLOYER);
-                // Sequentially executing the following transactions:
-                // 1. Fund the deployer wallet
-                provider.send_transaction(tx.clone()).await?.watch().await?;
-                // 2. Use the funded deployer wallet to deploy Multicall3 with a signed txn
-                provider
-                    .send_raw_transaction(MULTICALL3_DEPLOY_CODE)
-                    .await?
-                    .watch()
-                    .await?;
-            }
+                    .with_to(SAFE_DEPLOYER_ADDRESS)
+                    .with_value(SAFE_DEPLOYER_BALANCE);
+
+                provider.send_transaction(tx).await?.watch().await?;
+
+                let tx = provider.send_raw_transaction(&SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE).await?.get_receipt()
+                .await?;
+                // .unwrap();
+                tx.contract_address.unwrap()
+            };
+            debug!("Safe diamond proxy singleton {:?}", safe_diamond_proxy_address);
+
+            // Deploy minimum Safe suite
+            // 1. Safe proxy factory deploySafeProxyFactory();
+            let _tx_safe_proxy_factory = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(&SAFE_PROXY_FACTORY_DEPLOY_CODE);
+            // 2. Handler: only CompatibilityFallbackHandler and omit TokenCallbackHandler as it's not used now
+            // 2. Hanlder: deploy Safe ExtensibleFallbackHandler, v1.5.0
+            let _tx_safe_compatibility_fallback_handler = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V150
+            );
+            // 3. Library: only MultiSendCallOnly and omit MultiSendCall
+            let _tx_safe_multisend_call_only = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE
+            );
+            // 4. Safe singleton v1.4.1 deploySafe();
+            let _tx_safe_singleton_v141 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_SINGLETON_DEPLOY_CODE_V141
+            );
+            // 5. Safe L2 singleton v1.4.1 deploySafe();
+            let _tx_safe_l2_singleton_v141 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_SINGLETON_L2_DEPLOY_CODE_V141
+            );
+            // 6. Safe multisend:
+            let _tx_safe_multisend = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_MULTISEND_DEPLOY_CODE
+            );
+            // 7. Safe L2 singleton v1.5.0 deploySafe();
+            let _tx_safe_l2_singleton_v150 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
+                &SAFE_SINGLETON_L2_DEPLOY_CODE_V150
+            );
+            // other omitted libs: SimulateTxAccessor, CreateCall, and SignMessageLib
+            // broadcast those transactions
+            provider.send_transaction(_tx_safe_proxy_factory).await?.watch().await?;
+            provider
+                .send_transaction(_tx_safe_compatibility_fallback_handler)
+                .await?
+                .watch()
+                .await?;
+            provider
+                .send_transaction(_tx_safe_multisend_call_only)
+                .await?
+                .watch()
+                .await?;
+            provider.send_transaction(_tx_safe_singleton_v141).await?.watch().await?;
+            provider.send_transaction(_tx_safe_l2_singleton_v141).await?.watch().await?;
+            provider.send_transaction(_tx_safe_multisend).await?.watch().await?;
+            provider.send_transaction(_tx_safe_l2_singleton_v150).await?.watch().await?;
         }
 
-        debug!("deploying contracts...");
+        let code_safe_singleton_v141 = provider
+            .get_code_at(SAFE_SINGLETON_L2_ADDRESS_V141)
+            .await?;
+        let code_safe_singleton_v150 = provider
+            .get_code_at(SAFE_SINGLETON_L2_ADDRESS_V150)
+            .await?;
+        let code_compatibility_handler_v150 = provider
+            .get_code_at(SAFE_COMPATIBILITY_FALLBACK_HANDLER_ADRESS_V150)
+            .await?;
+        assert!(!code_safe_singleton_v141.is_empty(), "Safe singleton v1.4.1 not deployed");
+        assert!(!code_safe_singleton_v150.is_empty(), "Safe singleton v1.5.0 not deployed");
+        assert!(!code_compatibility_handler_v150.is_empty(), "Safe compatibility handler v1.5.0 not deployed");
+        Ok(())
+    }
 
+    /// Deploys testing environment (with dummy network registry proxy) via the given provider.
+    async fn inner_deploy_common_contracts_for_testing(provider: P, deployer: &ChainKeypair) -> ContractResult<Self> {
+        // Pre-deploy common contracts
+        ContractInstances::deploy_erc1820_registry(provider.clone()).await?;
+        ContractInstances::deploy_multicall3(provider.clone()).await?;
+        ContractInstances::deploy_safe_suites(provider.clone()).await?;
+
+        debug!("deploying contracts...");
         // Get deployer address
         let self_address = a2h(deployer.public().to_address());
 
@@ -324,6 +427,13 @@ where
         )
         .await?;
 
+        let node_safe_migration = HoprNodeSafeMigration::deploy(
+            provider.clone(),
+            primitives::Address::from(module_implementation.address().as_ref()),
+            primitives::Address::from(stake_factory.address().as_ref()),
+        )
+        .await?;
+
         // get the defaultHoprNetwork from the stake factory
         let default_hopr_network = stake_factory.defaultHoprNetwork().call().await?;
         let new_default_hopr_network = HoprNodeStakeFactory::HoprNetwork {
@@ -348,6 +458,7 @@ where
             win_prob_oracle,
             stake_factory,
             module_implementation,
+            node_safe_migration,
         })
     }
 
@@ -356,6 +467,20 @@ where
         let instances = Self::inner_deploy_common_contracts_for_testing(provider.clone(), deployer).await?;
 
         Ok(Self { ..instances })
+    }
+
+    pub fn get_contract_addresses(&self) -> hopr_bindings::ContractAddresses {
+        hopr_bindings::ContractAddresses {
+            token: *self.token.address(),
+            channels: *self.channels.address(),
+            announcements: *self.announcements.address(),
+            node_safe_registry: *self.safe_registry.address(),
+            ticket_price_oracle: *self.price_oracle.address(),
+            winning_probability_oracle: *self.win_prob_oracle.address(),
+            node_stake_factory: *self.stake_factory.address(),
+            module_implementation: *self.module_implementation.address(),
+            node_safe_migration: *self.node_safe_migration.address(),
+        }
     }
 }
 
@@ -371,7 +496,7 @@ where
             node_safe_registry: h2a(*instances.safe_registry.address()),
             ticket_price_oracle: h2a(*instances.price_oracle.address()),
             winning_probability_oracle: h2a(*instances.win_prob_oracle.address()),
-            node_safe_migration: hopr_primitive_types::prelude::Address::default(),
+            node_safe_migration: h2a(*instances.node_safe_migration.address()),
             node_stake_factory: h2a(*instances.stake_factory.address()),
             module_implementation: h2a(*instances.module_implementation.address()),
         }
@@ -753,7 +878,7 @@ where
 
     // Check if safe suite has been deployed. If so, skip this step
     let code = provider
-        .get_code_at(address!("914d7Fec6aaC8cd542e72Bca78B30650d45643d7"))
+        .get_code_at(SAFE_SINGLETON_ADDRESS)
         .await?;
 
     // only deploy contracts when needed
@@ -763,8 +888,8 @@ where
         let safe_diamond_proxy_address = {
             // Fund Safe singleton deployer 0.01 anvil-eth and deploy Safe singleton
             let tx = TransactionRequest::default()
-                .with_to(address!("E1CB04A0fA36DdD16a06ea828007E35e1a3cBC37"))
-                .with_value(U256::from(10000000000000000u128));
+                .with_to(SAFE_DEPLOYER_ADDRESS)
+                .with_value(SAFE_DEPLOYER_BALANCE);
 
             provider.send_transaction(tx).await?.watch().await?;
 
@@ -787,7 +912,7 @@ where
             // 2. Handler: only CompatibilityFallbackHandler and omit TokenCallbackHandler as it's not used now
             let _tx_safe_compatibility_fallback_handler = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE);
+                .with_input(SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141);
             // 3. Library: only MultiSendCallOnly and omit MultiSendCall
             let _tx_safe_multisend_call_only = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
@@ -795,7 +920,7 @@ where
             // 4. Safe singleton deploySafe();
             let _tx_safe_singleton = TransactionRequest::default()
                 .with_to(safe_diamond_proxy_address)
-                .with_input(SAFE_SINGLETON_DEPLOY_CODE);
+                .with_input(SAFE_SINGLETON_DEPLOY_CODE_V141);
             // other omitted libs: SimulateTxAccessor, CreateCall, and SignMessageLib
             // broadcast those transactions
             provider.send_transaction(_tx_safe_proxy_factory).await?.watch().await?;
@@ -877,4 +1002,22 @@ where
     debug!("instance_deployment_tx safe instance {:?}", deployed_safe_address);
 
     Ok((h2a(deployed_module_address), h2a(deployed_safe_address)))
+}
+
+pub fn create_anvil_at_port(default: bool) -> AnvilInstance {
+    let mut anvil = Anvil::new();
+
+    if !default {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("Failed to bind localhost"));
+        let random_port = listener
+            .local_addr()
+            .unwrap_or_else(|_| panic!("Failed to get local address"))
+            .port();
+        anvil = anvil.port(random_port);
+        anvil = anvil.chain_id(random_port.into());
+    } else {
+        anvil = anvil.port(8545u16);
+    }
+    anvil.spawn()
 }

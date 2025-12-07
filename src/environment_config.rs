@@ -106,7 +106,6 @@ impl NetworkProviderArgs {
 
     /// get the provider object
     pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors>
-// ) -> Result<Arc<NonceManagerMiddleware<SignerMiddleware<Provider<JsonRpcClient>, Wallet<SigningKey>>>>, HelperErrors>
     {
         // Build transport
         let parsed_url = url::Url::parse(self.provider_url.as_str()).unwrap();
@@ -168,26 +167,9 @@ mod tests {
         node_bindings::{Anvil, AnvilInstance},
         providers::Provider,
     };
+    use crate::{methods::create_rpc_client_to_anvil, utils::{ContractInstances, create_anvil_at_port}};
 
     use super::*;
-
-    fn create_anvil_at_port(default: bool) -> AnvilInstance {
-        let mut anvil = Anvil::new();
-
-        if !default {
-            let listener =
-                std::net::TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("Failed to bind localhost"));
-            let random_port = listener
-                .local_addr()
-                .unwrap_or_else(|_| panic!("Failed to get local address"))
-                .port();
-            anvil = anvil.port(random_port);
-            anvil = anvil.chain_id(random_port.into());
-        } else {
-            anvil = anvil.port(8545u16);
-        }
-        anvil.spawn()
-    }
 
     #[tokio::test]
     async fn test_network_provider_with_signer() -> anyhow::Result<()> {
@@ -225,6 +207,55 @@ mod tests {
         };
 
         let provider = network_provider_args.get_provider_with_signer(&chain_key).await?;
+
+        let chain_id = provider.get_chain_id().await?;
+        assert_eq!(chain_id, anvil.chain_id());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_local_contract_creation_and_interaction() -> anyhow::Result<()> {
+        // launch local anvil instance
+        let anvil = create_anvil_at_port(true);
+
+        // use the first funded identity of anvil
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        
+        // create client
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        // deploy local contracts 
+        let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
+            .await
+            .expect("failed to deploy");
+
+        // temprary write the contract addresses to a json file
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let contracts_root_path = temp_dir.path().to_str().unwrap().to_string();
+        let contract_addresses = SingleNetworkContractAddresses {
+            chain_id: anvil.chain_id(),
+            indexer_start_block_number: 0u32,
+            addresses: instances.get_contract_addresses()
+        };
+
+        let network_name = "anvil-localhost";
+        let mut networks_map = BTreeMap::new();
+        networks_map.insert(network_name.to_string(), contract_addresses);
+        let network_config = NetworkConfig {
+            networks: networks_map,
+        };
+        let contract_environment_config_path =
+            PathBuf::from(OsStr::new(&contracts_root_path)).join("contracts-addresses.json");
+        let file_content = serde_json::to_string_pretty(&network_config).unwrap();
+        std::fs::write(&contract_environment_config_path, file_content)
+            .expect("failed to write contract addresses to temp file");
+
+        let network_provider_args = NetworkProviderArgs {
+            network: "anvil-localhost".into(),
+            contracts_root: Some(contracts_root_path.into()),
+            provider_url: anvil.endpoint(),
+        };
+
+        let provider = network_provider_args.get_provider_with_signer(&contract_deployer).await?;
 
         let chain_id = provider.get_chain_id().await?;
         assert_eq!(chain_id, anvil.chain_id());
