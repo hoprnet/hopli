@@ -164,7 +164,6 @@ impl NetworkProviderArgs {
 #[cfg(test)]
 mod tests {
     use hopr_bindings::exports::alloy::{
-        node_bindings::{Anvil, AnvilInstance},
         providers::Provider,
     };
     use crate::{methods::create_rpc_client_to_anvil, utils::{ContractInstances, create_anvil_at_port}};

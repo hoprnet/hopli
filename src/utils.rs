@@ -3,7 +3,6 @@
 use std::str::FromStr;
 
 use SafeContract::SafeContractInstance;
-use hex_literal::hex;
 use hopr_bindings::{
     exports::alloy::{
         self,
@@ -11,7 +10,7 @@ use hopr_bindings::{
         hex::FromHexError,
         network::{ReceiptResponse, TransactionBuilder},
         node_bindings::{Anvil, AnvilInstance},
-        primitives::{self, Address, Bytes, U256, address, aliases, keccak256},
+        primitives::{self, Address, Bytes, U256, aliases, keccak256},
         providers::{MULTICALL3_ADDRESS, MulticallError, PendingTransactionError},
         rpc::types::TransactionRequest,
         signers::{Signer, local::PrivateKeySigner},
@@ -556,37 +555,6 @@ pub fn create_anvil(block_time: Option<std::time::Duration>) -> alloy::node_bind
     }
 
     anvil.spawn()
-}
-
-/// Mints specified amount of HOPR tokens to the contract deployer wallet.
-/// Assumes that the `hopr_token` contract is associated with a RPC client that also deployed the contract.
-/// Returns the block number at which the minting transaction was confirmed.
-pub async fn mint_tokens<P, N>(hopr_token: HoprTokenInstance<P, N>, amount: U256) -> ContractResult<Option<u64>>
-where
-    P: alloy::contract::private::Provider<N>,
-    N: alloy::providers::Network,
-{
-    let deployer = hopr_token
-        .provider()
-        .get_accounts()
-        .await
-        .expect("client must have a signer")[0];
-
-    hopr_token
-        .grantRole(*MINTER_ROLE_VALUE, deployer)
-        .send()
-        .await?
-        .watch()
-        .await?;
-
-    let tx_receipt = hopr_token
-        .mint(deployer, amount, Bytes::new(), Bytes::new())
-        .send()
-        .await?
-        .get_receipt()
-        .await?;
-
-    Ok(tx_receipt.block_number())
 }
 
 /// Creates a transaction that transfers the given `amount` of native tokens to the
