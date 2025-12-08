@@ -11,7 +11,7 @@ use hopr_bindings::{
         rpc::types::TransactionRequest,
         sol_types::SolCall,
     },
-    hopr_node_stake_factory::HoprNodeStakeFactory::cloneCall ,
+    hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
     hopr_token::HoprToken::transferCall,
 }; 
@@ -30,12 +30,12 @@ use crate::{
 
 pub fn transfer_hopr_token_payload(
     token_address: Address,
-    addresses: Address,
-    amounts: U256
+    address: Address,
+    amount: U256
 ) -> Result<TransactionRequest, HelperErrors> {
     let transfer_function_payload = transferCall {
-        recipient: addresses,
-        amount: amounts,
+        recipient: address,
+        amount: amount,
     }
     .abi_encode();
     let tx = TransactionRequest::default()
@@ -96,16 +96,15 @@ pub fn edge_node_predict_safe_address(
     let mut temporary_admins: Vec<Address> = admins.clone();
     temporary_admins.insert(0, MULTICALL3_ADDRESS);
     info!(
-        "temporary_admins expends from admin from {:?} addresses to {:?}",
+        "temporary_admins expands from admin from {:?} addresses to {:?}",
         admins.len(),
         temporary_admins.len()
     );
 
     // build the default permissions of capabilities
     let default_target =
-    // let default_target: [u8; 32] =
         U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-            .unwrap();
+            .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
     debug!("default target {:?}", default_target);
 
     let safe_address = predict_safe_address(
@@ -117,6 +116,26 @@ pub fn edge_node_predict_safe_address(
         SAFE_SAFEPROXYFACTORY_ADDRESS,
     )?;
     Ok(safe_address)
+}
+
+pub fn edge_node_predict_module_address(
+    hopr_channels_address: Address,
+    predicted_safe_address: Address,
+    nonce: U256,
+) -> Result<Vec<u8>, HelperErrors> {
+    // build the default permissions of capabilities
+    let default_target =
+        U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+            .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    debug!("default target {:?}", default_target);
+
+    let predict_module_address_payload = predictModuleAddress_1Call {
+            caller: MULTICALL3_ADDRESS,
+            nonce: nonce.into(),
+            safe: predicted_safe_address,
+            defaultTarget: default_target.into(),
+    }.abi_encode();
+    Ok(predict_module_address_payload)
 }
 
 /// Payload for deploying safe module with target addresses and node addresses
@@ -143,7 +162,7 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     let mut temporary_admins: Vec<Address> = admins.clone();
     temporary_admins.insert(0, MULTICALL3_ADDRESS);
     info!(
-        "temporary_admins expends from admin from {:?} addresses to {:?}",
+        "temporary_admins expands from admin from {:?} addresses to {:?}",
         admins.len(),
         temporary_admins.len()
     );
@@ -174,7 +193,8 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     if let Some(nodes) = node_addresses {
         for node in nodes {
             let node_target =
-                U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}")).expect("Invalid node_target format");
+                U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
+                    .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
 
             let encoded_call = includeNodeCall {
                 nodeDefaultTarget: node_target,
@@ -210,7 +230,6 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
         predicted_safe_address,
         remove_owner_tx_payload,
     );
-    // let multicall = multicall.add_call(multicall_payload_5);
 
     multicall_payloads.push(multicall_payload_5.to_call3());
     info!("Admins and threshold setting multicall payload is created");

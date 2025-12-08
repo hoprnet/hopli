@@ -227,7 +227,7 @@ mod tests {
             .await
             .expect("failed to deploy");
 
-        // temprary write the contract addresses to a json file
+        // temporary write the contract addresses to a json file
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let contracts_root_path = temp_dir.path().to_str().unwrap().to_string();
         let contract_addresses = SingleNetworkContractAddresses {

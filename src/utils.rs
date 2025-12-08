@@ -281,7 +281,6 @@ where
         let code = provider
             .get_code_at(SAFE_SINGLETON_ADDRESS)
             .await?;
-        // .map_err(|e| ContractError::MiddlewareError { e })?;
 
         // only deploy contracts when needed
         if code.is_empty() {
@@ -297,7 +296,6 @@ where
 
                 let tx = provider.send_raw_transaction(&SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE).await?.get_receipt()
                 .await?;
-                // .unwrap();
                 tx.contract_address.unwrap()
             };
             debug!("Safe diamond proxy singleton {:?}", safe_diamond_proxy_address);
@@ -306,7 +304,7 @@ where
             // 1. Safe proxy factory deploySafeProxyFactory();
             let _tx_safe_proxy_factory = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(&SAFE_PROXY_FACTORY_DEPLOY_CODE);
             // 2. Handler: only CompatibilityFallbackHandler and omit TokenCallbackHandler as it's not used now
-            // 2. Hanlder: deploy Safe ExtensibleFallbackHandler, v1.5.0
+            // 2. Handler: deploy Safe ExtensibleFallbackHandler, v1.5.0
             let _tx_safe_compatibility_fallback_handler = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
                 &SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V150
             );
