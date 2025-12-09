@@ -21,7 +21,7 @@
 //! ```shell
 //! hopli win-prob convert --winning-probability 0.5
 //! ```
-use clap::Parser;
+use clap::{Parser, builder::ValueParser};
 use hopr_bindings::{
     exports::alloy::primitives::aliases::U56, hopr_winning_probability_oracle::HoprWinningProbabilityOracle,
 };
@@ -33,6 +33,14 @@ use crate::{
     key_pair::{ArgEnvReader, PrivateKeyArgs},
     utils::{Cmd, HelperErrors},
 };
+
+fn parse_win_prob_f64(s: &str) -> Result<f64, String> {
+    let win_prob: f64 = s.parse().map_err(|_| "Invalid number format".to_string())?;
+    if !(0.0..=1.0).contains(&win_prob) {
+        return Err("Winning probability must be between 0.0 and 1.0".into());
+    }
+    Ok(win_prob)
+}
 
 /// CLI arguments for `hopli win-prob`
 #[derive(Clone, Debug, Parser)]
@@ -66,10 +74,11 @@ pub enum WinProbSubcommands {
     Convert {
         /// Winning probability in f64 format
         #[clap(
-            help = "Winning probability in f64 format",
+            help = "Winning probability in f64 format (must be between 0.0 and 1.0)",
             short = 'w',
             long,
-            default_value_t = 1.0f64
+            default_value_t = 1.0f64,
+            value_parser = ValueParser::new(parse_win_prob_f64)
         )]
         winning_probability: f64,
     },
