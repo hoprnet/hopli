@@ -328,8 +328,8 @@ mod tests {
 
         let tx = edge_node_deploy_safe_module_and_maybe_include_node(
             hopr_node_stake_factory_address,
-            hopr_channels_address,
             hopr_token_address,
+            hopr_channels_address,
             nonce,
             amount,
             admins,
