@@ -1,6 +1,6 @@
 use hex_literal::hex;
 use hopr_bindings::exports::alloy::{
-    primitives::{Address, U256, address, b256, FixedBytes},
+    primitives::{Address, FixedBytes, U256, address, b256},
     uint,
 };
 
@@ -149,12 +149,14 @@ pub const DOMAIN_SEPARATOR_TYPEHASH: &str = "47e79534a245952e8b16893a336b85a3d9e
 
 /// function identifier from keccak256("_deploySafeAndModule(uint256,bytes32,address,address,uint256,address[])"))
 /// used in creating userdata when sending tokens along with safe creation
-pub const DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER: FixedBytes<32> = b256!("dd24c144db91d1bc600aac99393baf8f8c664ba461188f057e37f2c37b962b45");
+pub const DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER: FixedBytes<32> =
+    b256!("dd24c144db91d1bc600aac99393baf8f8c664ba461188f057e37f2c37b962b45");
 
 /// function identifier from
 /// (keccak256("_deploySafeAndModuleAndIncludeNodes(uint256,bytes32,address,address,uint256,address[])"))
 /// used in creating userdata when sending tokens along with safe creation
-pub const DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER: FixedBytes<32> = b256!("0105b97dcdf19d454ebe36f91ed516c2b90ee79f4a46af96a0138c1f5403c1cc");
+pub const DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER: FixedBytes<32> =
+    b256!("0105b97dcdf19d454ebe36f91ed516c2b90ee79f4a46af96a0138c1f5403c1cc");
 
 #[cfg(test)]
 pub mod tests {

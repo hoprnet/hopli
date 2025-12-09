@@ -13,18 +13,16 @@ use hopr_bindings::{
         sol_types::{SolCall, SolValue},
     },
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
-    hopr_node_stake_factory::HoprNodeStakeFactory::{
-        cloneCall, predictModuleAddress_1Call,
-    },
-    hopr_token::HoprToken::{transferCall, sendCall},
+    hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
+    hopr_token::HoprToken::{sendCall, transferCall},
 };
 use tracing::{debug, info};
 
 use crate::{
     constants::{
-        DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
-        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
-        DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER, DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER
+        DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER,
+        DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_SAFE_L2_ADDRESS,
+        SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
     },
     methods::{
         SafeSingleton::removeOwnerCall, predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
@@ -284,7 +282,8 @@ pub fn edge_node_deploy_safe_module_and_maybe_include_node(
             defaultTarget: default_target.into(),
             admins,
         }
-        .abi_encode()[32..].to_vec()
+        .abi_encode()[32..]
+            .to_vec()
     } else {
         UserData {
             functionIdentifier: DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER,
@@ -292,7 +291,8 @@ pub fn edge_node_deploy_safe_module_and_maybe_include_node(
             defaultTarget: default_target.into(),
             admins,
         }
-        .abi_encode()[32..].to_vec()
+        .abi_encode()[32..]
+            .to_vec()
     };
 
     debug!("User data for deploying safe and module: {:?}", hex::encode(&user_data));
@@ -300,7 +300,8 @@ pub fn edge_node_deploy_safe_module_and_maybe_include_node(
         recipient: hopr_node_stake_factory_address,
         amount,
         data: user_data.into(),
-    }.abi_encode();
+    }
+    .abi_encode();
 
     let tx = TransactionRequest::default()
         .with_to(hopr_token_address)
@@ -324,7 +325,7 @@ mod tests {
             Address::from_str("0x00000000000000000000000000000000000000e1").unwrap(),
             Address::from_str("0x00000000000000000000000000000000000000e2").unwrap(),
         ];
-    
+
         let tx = edge_node_deploy_safe_module_and_maybe_include_node(
             hopr_node_stake_factory_address,
             hopr_channels_address,

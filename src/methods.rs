@@ -44,7 +44,7 @@ use crate::{
         DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
         SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
     },
-    payloads::{transfer_native_token_payload, edge_node_deploy_safe_module_and_maybe_include_node},
+    payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
     utils::{HelperErrors, get_create2_address},
 };
 
@@ -623,7 +623,6 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
     amount: U256,
     admins: Vec<Address>,
     should_include_node: bool,
-    
 ) -> Result<(SafeSingletonInstance<Arc<P>>, HoprNodeManagementModuleInstance<Arc<P>>), HelperErrors> {
     let provider = hopr_node_stake_factory.provider();
 
@@ -652,7 +651,6 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
     let deployed_safe = SafeSingleton::new(safe_address_from_log, provider.clone());
 
     Ok((deployed_safe, deployed_module))
-
 }
 
 /// Deploy a safe and a module proxies via v4 HoprStakeFactory contract with default permissions and announcement
@@ -1618,7 +1616,12 @@ mod tests {
             .await?;
         // mint tokens to the caller
         let desired_amount = U256::from(777_777_777_u128);
-        transfer_or_mint_tokens(instances.token.clone(), vec![a2h(contract_deployer.public().to_address())], vec![desired_amount.clone()]).await?;
+        transfer_or_mint_tokens(
+            instances.token.clone(),
+            vec![a2h(contract_deployer.public().to_address())],
+            vec![desired_amount.clone()],
+        )
+        .await?;
 
         // deploy safe and module
         let (safe, node_module) = deploy_safe_module_for_single_edge_node(
