@@ -216,7 +216,8 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
 
     // renounce ownership granted to multicall so that only actual admins are included. Set the threshold.
     let remove_owner_tx_payload = removeOwnerCall {
-        prevOwner: Address::from_str(SENTINEL_OWNERS).unwrap(),
+        prevOwner: Address::from_str(SENTINEL_OWNERS)
+            .map_err(|e| HelperErrors::ParseError(format!("Invalid SENTINEL_OWNERS address: {e}")))?,
         owner: MULTICALL3_ADDRESS,
         _threshold: U256::from(1),
     }
