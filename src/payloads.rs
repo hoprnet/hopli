@@ -9,11 +9,14 @@ use hopr_bindings::{
             bindings::IMulticall3::{Call3, Call3Value, aggregate3Call, aggregate3ValueCall},
         },
         rpc::types::TransactionRequest,
-        sol_types::SolCall,
+        sol,
+        sol_types::{SolCall, SolValue},
     },
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
-    hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
-    hopr_token::HoprToken::transferCall,
+    hopr_node_stake_factory::HoprNodeStakeFactory::{
+        cloneCall, predictModuleAddress_1Call,
+    },
+    hopr_token::HoprToken::{transferCall, sendCall},
 };
 use tracing::{debug, info};
 
@@ -21,6 +24,7 @@ use crate::{
     constants::{
         DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
         SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
+        DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER, DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER
     },
     methods::{
         SafeSingleton::removeOwnerCall, predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
@@ -242,4 +246,95 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
         .with_to(MULTICALL3_ADDRESS)
         .with_input(aggregate3_payload);
     Ok(tx)
+}
+
+sol! (
+    #![sol(all_derives)]
+    struct UserData {
+        bytes32 functionIdentifier;
+        uint256 nonce;
+        bytes32 defaultTarget;
+        address[] memory admins;
+    }
+);
+
+/// Deploy a safe and a module, while sending tokens to the safe for single edge node.
+/// It's possible to only deploy a safe and a module without onboarding the node
+/// Alternatively, the node will be included in the module after deployment
+/// All the "admins" will be the nodes added to the module
+/// Returns safe proxy address and module proxy address
+pub fn edge_node_deploy_safe_module_and_maybe_include_node(
+    hopr_node_stake_factory_address: Address,
+    hopr_token_address: Address,
+    hopr_channels_address: Address,
+    nonce: U256,
+    amount: U256,
+    admins: Vec<Address>,
+    should_include_node: bool,
+) -> Result<TransactionRequest, HelperErrors> {
+    // build the default permissions of capabilities
+    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    debug!("default target {:?}", default_target);
+
+    let user_data = if should_include_node {
+        UserData {
+            functionIdentifier: DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER,
+            nonce,
+            defaultTarget: default_target.into(),
+            admins,
+        }
+        .abi_encode()[32..].to_vec()
+    } else {
+        UserData {
+            functionIdentifier: DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER,
+            nonce,
+            defaultTarget: default_target.into(),
+            admins,
+        }
+        .abi_encode()[32..].to_vec()
+    };
+
+    debug!("User data for deploying safe and module: {:?}", hex::encode(&user_data));
+    let tx_payload = sendCall {
+        recipient: hopr_node_stake_factory_address,
+        amount,
+        data: user_data.into(),
+    }.abi_encode();
+
+    let tx = TransactionRequest::default()
+        .with_to(hopr_token_address)
+        .with_input(tx_payload);
+    Ok(tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_edge_node_deploy_safe_module_and_maybe_include_node() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let hopr_node_stake_factory_address = Address::from_str("0x0000000000000000000000000000000000000001").unwrap();
+        let hopr_channels_address = Address::from_str("0x0000000000000000000000000000000000000002").unwrap();
+        let hopr_token_address = Address::from_str("0x0000000000000000000000000000000000000003").unwrap();
+        let nonce = U256::from(1);
+        let amount = U256::from(1000);
+        let admins = vec![
+            Address::from_str("0x00000000000000000000000000000000000000e1").unwrap(),
+            Address::from_str("0x00000000000000000000000000000000000000e2").unwrap(),
+        ];
+    
+        let tx = edge_node_deploy_safe_module_and_maybe_include_node(
+            hopr_node_stake_factory_address,
+            hopr_channels_address,
+            hopr_token_address,
+            nonce,
+            amount,
+            admins,
+            true,
+        )?;
+        println!("Transaction Request: {:?}", tx);
+        Ok(())
+    }
 }

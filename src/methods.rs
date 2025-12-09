@@ -44,7 +44,7 @@ use crate::{
         DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
         SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
     },
-    payloads::transfer_native_token_payload,
+    payloads::{transfer_native_token_payload, edge_node_deploy_safe_module_and_maybe_include_node},
     utils::{HelperErrors, get_create2_address},
 };
 
@@ -609,6 +609,50 @@ pub fn prepare_safe_tx_multicall_payload_from_owner_contract(
     .abi_encode();
 
     CallItem::<execTransactionCall>::new(deployed_safe, input.into())
+}
+
+/// Deploy a safe and a module, while sending tokens to the safe for single edge node.
+/// It's possible to only deploy a safe and a module without onboarding the node
+/// Alternatively, the node will be included in the module after deployment
+/// Returns safe proxy address and module proxy address
+pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provider>(
+    hopr_node_stake_factory: HoprNodeStakeFactoryInstance<Arc<P>>,
+    hopr_token_address: Address,
+    hopr_channels_address: Address,
+    nonce: U256,
+    amount: U256,
+    admins: Vec<Address>,
+    should_include_node: bool,
+    
+) -> Result<(SafeSingletonInstance<Arc<P>>, HoprNodeManagementModuleInstance<Arc<P>>), HelperErrors> {
+    let provider = hopr_node_stake_factory.provider();
+
+    let tx = edge_node_deploy_safe_module_and_maybe_include_node(
+        *hopr_node_stake_factory.address(),
+        hopr_token_address,
+        hopr_channels_address,
+        nonce,
+        amount,
+        admins,
+        should_include_node,
+    )?;
+    let tx_receipt = provider.send_transaction(tx).await?.get_receipt().await?;
+
+    let safe_address_from_log = tx_receipt
+        .decoded_log::<hopr_bindings::hopr_node_stake_factory::HoprNodeStakeFactory::NewHoprNodeStakeSafe>()
+        .ok_or_else(|| HelperErrors::ContractNotDeployed("cannot find safe from log".into()))?
+        .instance;
+    let module_address_from_log = tx_receipt
+        .decoded_log::<hopr_bindings::hopr_node_stake_factory::HoprNodeStakeFactory::NewHoprNodeStakeModule>()
+        .ok_or_else(|| HelperErrors::ContractNotDeployed("cannot find module from log".into()))?
+        .instance;
+    info!("tx_receipt {:?}", tx_receipt);
+
+    let deployed_module = HoprNodeManagementModuleInstance::new(module_address_from_log, provider.clone());
+    let deployed_safe = SafeSingleton::new(safe_address_from_log, provider.clone());
+
+    Ok((deployed_safe, deployed_module))
+
 }
 
 /// Deploy a safe and a module proxies via v4 HoprStakeFactory contract with default permissions and announcement
@@ -1537,6 +1581,93 @@ mod tests {
             module_addr, module_address_predicted_from_sc,
             "module prediction does not match"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deploy_safe_and_module_for_edge_node() -> anyhow::Result<()> {
+        init_tracing();
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // prepare some input data
+        let mut admin_addresses: Vec<Address> = Vec::new();
+        for _ in 0..2 {
+            admin_addresses.push(get_random_address_for_testing());
+        }
+
+        // launch local anvil instance
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
+            .await
+            .expect("failed to deploy");
+        // deploy multicall contract
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        // deploy safe suits
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        // grant deployer token minter role
+        let encoded_minter_role = keccak256(b"MINTER_ROLE");
+        instances
+            .token
+            .grantRole(encoded_minter_role, a2h(contract_deployer.public().to_address()))
+            .send()
+            .await?
+            .watch()
+            .await?;
+        // mint tokens to the caller
+        let desired_amount = U256::from(777_777_777_u128);
+        transfer_or_mint_tokens(instances.token.clone(), vec![a2h(contract_deployer.public().to_address())], vec![desired_amount.clone()]).await?;
+
+        // deploy safe and module
+        let (safe, node_module) = deploy_safe_module_for_single_edge_node(
+            instances.stake_factory,
+            *instances.token.address(),
+            *instances.channels.address(),
+            U256::from(123_456_u128),
+            desired_amount,
+            admin_addresses.clone(),
+            true,
+        )
+        .await?;
+
+        // check announcement is a target
+        let try_get_announcement_target = node_module
+            .tryGetTarget(*instances.announcements.address())
+            .call()
+            .await?;
+
+        assert!(try_get_announcement_target._0, "announcement is not a target");
+
+        // check allowance for channel contract has increased
+        let allowance = instances
+            .token
+            .allowance(*safe.address(), *instances.channels.address())
+            .call()
+            .await?;
+
+        assert_eq!(
+            allowance,
+            U256::from(1_000_000_000_000_000_000_000_u128),
+            "allowance is not set"
+        );
+
+        // check nodes (admins) have been included in the module
+        for node_address in &admin_addresses {
+            let is_node_included = node_module.isNode(*node_address).call().await?;
+            assert!(is_node_included, "failed to include a node");
+        }
+
+        // check owners are provided admins
+        let owners = safe.getOwners().call().await?;
+        let thresold = safe.getThreshold().call().await?;
+
+        assert_eq!(owners.len(), 2, "should have 2 owners");
+        for (i, owner) in owners.iter().enumerate() {
+            assert_eq!(owner, &admin_addresses[i], "admin is wrong");
+        }
+        assert_eq!(thresold, U256::from(1), "threshold should be one");
         Ok(())
     }
 
