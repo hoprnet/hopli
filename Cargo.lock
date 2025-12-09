@@ -2220,8 +2220,6 @@ dependencies = [
  "rpassword",
  "serde",
  "serde_json",
- "serde_with",
- "strum",
  "tempfile",
  "thiserror",
  "tikv-jemallocator",
