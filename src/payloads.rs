@@ -5,37 +5,37 @@ use hopr_bindings::{
         network::TransactionBuilder,
         primitives::{Address, Bytes, U256},
         providers::{
-            MULTICALL3_ADDRESS, CallInfoTrait,
+            CallInfoTrait, MULTICALL3_ADDRESS,
             bindings::IMulticall3::{Call3, Call3Value, aggregate3Call, aggregate3ValueCall},
         },
         rpc::types::TransactionRequest,
         sol_types::SolCall,
     },
-    hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
+    hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
     hopr_token::HoprToken::transferCall,
-}; 
+};
 use tracing::{debug, info};
+
 use crate::{
     constants::{
-        DEFAULT_CAPABILITY_PERMISSIONS, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_SAFE_L2_ADDRESS,
-        SAFE_SAFEPROXYFACTORY_ADDRESS, DEFAULT_NODE_PERMISSIONS,SENTINEL_OWNERS
+        DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
+        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
     },
     methods::{
-        predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
-        SafeSingleton::removeOwnerCall
+        SafeSingleton::removeOwnerCall, predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
     },
-    utils::HelperErrors
+    utils::HelperErrors,
 };
 
 pub fn transfer_hopr_token_payload(
     token_address: Address,
     address: Address,
-    amount: U256
+    amount: U256,
 ) -> Result<TransactionRequest, HelperErrors> {
     let transfer_function_payload = transferCall {
         recipient: address,
-        amount: amount,
+        amount,
     }
     .abi_encode();
     let tx = TransactionRequest::default()
@@ -46,11 +46,13 @@ pub fn transfer_hopr_token_payload(
 
 pub fn transfer_native_token_payload(
     addresses: Vec<Address>,
-    amounts: Vec<U256>
+    amounts: Vec<U256>,
 ) -> Result<TransactionRequest, HelperErrors> {
     // check if two vectors have the same length
     if addresses.len() != amounts.len() {
-        return Err(HelperErrors::MissingParameter("Addresses and amounts length mismatch".into()));
+        return Err(HelperErrors::MissingParameter(
+            "Addresses and amounts length mismatch".into(),
+        ));
     }
 
     // calculate the sum of tokens to be sent
@@ -102,9 +104,8 @@ pub fn edge_node_predict_safe_address(
     );
 
     // build the default permissions of capabilities
-    let default_target =
-        U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-            .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
     debug!("default target {:?}", default_target);
 
     let safe_address = predict_safe_address(
@@ -124,17 +125,17 @@ pub fn edge_node_predict_module_address(
     nonce: U256,
 ) -> Result<Vec<u8>, HelperErrors> {
     // build the default permissions of capabilities
-    let default_target =
-        U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-            .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
     debug!("default target {:?}", default_target);
 
     let predict_module_address_payload = predictModuleAddress_1Call {
-            caller: MULTICALL3_ADDRESS,
-            nonce: nonce.into(),
-            safe: predicted_safe_address,
-            defaultTarget: default_target.into(),
-    }.abi_encode();
+        caller: MULTICALL3_ADDRESS,
+        nonce,
+        safe: predicted_safe_address,
+        defaultTarget: default_target.into(),
+    }
+    .abi_encode();
     Ok(predict_module_address_payload)
 }
 
@@ -168,10 +169,8 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     );
 
     // build the default permissions of capabilities
-    let default_target =
-    // let default_target: [u8; 32] =
-        U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-            .unwrap();
+    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
     debug!("default target {:?}", default_target);
 
     // Use multicall to deploy a safe proxy instance and a module proxy instance with multicall as an owner
@@ -180,7 +179,7 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
         target: hopr_node_stake_factory_address,
         allowFailure: false,
         callData: cloneCall {
-            nonce: nonce.into(),
+            nonce,
             defaultTarget: default_target.into(),
             admins: temporary_admins,
         }
@@ -192,9 +191,8 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     // if node addresses are known, include nodes to the module by safe
     if let Some(nodes) = node_addresses {
         for node in nodes {
-            let node_target =
-                U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
-                    .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
+            let node_target = U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
+                .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
 
             let encoded_call = includeNodeCall {
                 nodeDefaultTarget: node_target,

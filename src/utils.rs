@@ -24,9 +24,7 @@ use hopr_bindings::{
     hopr_node_management_module::{
         HoprNodeManagementModule, HoprNodeManagementModule::HoprNodeManagementModuleInstance,
     },
-    hopr_node_safe_migration::{
-        HoprNodeSafeMigration, HoprNodeSafeMigration::HoprNodeSafeMigrationInstance,
-    },
+    hopr_node_safe_migration::{HoprNodeSafeMigration, HoprNodeSafeMigration::HoprNodeSafeMigrationInstance},
     hopr_node_safe_registry::{HoprNodeSafeRegistry, HoprNodeSafeRegistry::HoprNodeSafeRegistryInstance},
     hopr_node_stake_factory::{HoprNodeStakeFactory, HoprNodeStakeFactory::HoprNodeStakeFactoryInstance},
     hopr_ticket_price_oracle::{HoprTicketPriceOracle, HoprTicketPriceOracle::HoprTicketPriceOracleInstance},
@@ -278,9 +276,7 @@ where
         debug!("deploying Safe contracts...");
 
         // Check if safe suite has been deployed. If so, skip this step
-        let code = provider
-            .get_code_at(SAFE_SINGLETON_ADDRESS)
-            .await?;
+        let code = provider.get_code_at(SAFE_SINGLETON_ADDRESS).await?;
 
         // only deploy contracts when needed
         if code.is_empty() {
@@ -294,40 +290,45 @@ where
 
                 provider.send_transaction(tx).await?.watch().await?;
 
-                let tx = provider.send_raw_transaction(&SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE).await?.get_receipt()
-                .await?;
+                let tx = provider
+                    .send_raw_transaction(&SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE)
+                    .await?
+                    .get_receipt()
+                    .await?;
                 tx.contract_address.unwrap()
             };
             debug!("Safe diamond proxy singleton {:?}", safe_diamond_proxy_address);
 
             // Deploy minimum Safe suite
             // 1. Safe proxy factory deploySafeProxyFactory();
-            let _tx_safe_proxy_factory = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(&SAFE_PROXY_FACTORY_DEPLOY_CODE);
+            let _tx_safe_proxy_factory = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_PROXY_FACTORY_DEPLOY_CODE);
             // 2. Handler: only CompatibilityFallbackHandler and omit TokenCallbackHandler as it's not used now
             // 2. Handler: deploy Safe ExtensibleFallbackHandler, v1.5.0
-            let _tx_safe_compatibility_fallback_handler = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V150
-            );
+            let _tx_safe_compatibility_fallback_handler = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V150);
             // 3. Library: only MultiSendCallOnly and omit MultiSendCall
-            let _tx_safe_multisend_call_only = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE
-            );
+            let _tx_safe_multisend_call_only = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE);
             // 4. Safe singleton v1.4.1 deploySafe();
-            let _tx_safe_singleton_v141 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_SINGLETON_DEPLOY_CODE_V141
-            );
+            let _tx_safe_singleton_v141 = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_SINGLETON_DEPLOY_CODE_V141);
             // 5. Safe L2 singleton v1.4.1 deploySafe();
-            let _tx_safe_l2_singleton_v141 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_SINGLETON_L2_DEPLOY_CODE_V141
-            );
+            let _tx_safe_l2_singleton_v141 = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_SINGLETON_L2_DEPLOY_CODE_V141);
             // 6. Safe multisend:
-            let _tx_safe_multisend = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_MULTISEND_DEPLOY_CODE
-            );
+            let _tx_safe_multisend = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_MULTISEND_DEPLOY_CODE);
             // 7. Safe L2 singleton v1.5.0 deploySafe();
-            let _tx_safe_l2_singleton_v150 = TransactionRequest::default().with_to(safe_diamond_proxy_address).with_input(
-                &SAFE_SINGLETON_L2_DEPLOY_CODE_V150
-            );
+            let _tx_safe_l2_singleton_v150 = TransactionRequest::default()
+                .with_to(safe_diamond_proxy_address)
+                .with_input(SAFE_SINGLETON_L2_DEPLOY_CODE_V150);
             // other omitted libs: SimulateTxAccessor, CreateCall, and SignMessageLib
             // broadcast those transactions
             provider.send_transaction(_tx_safe_proxy_factory).await?.watch().await?;
@@ -341,24 +342,41 @@ where
                 .await?
                 .watch()
                 .await?;
-            provider.send_transaction(_tx_safe_singleton_v141).await?.watch().await?;
-            provider.send_transaction(_tx_safe_l2_singleton_v141).await?.watch().await?;
+            provider
+                .send_transaction(_tx_safe_singleton_v141)
+                .await?
+                .watch()
+                .await?;
+            provider
+                .send_transaction(_tx_safe_l2_singleton_v141)
+                .await?
+                .watch()
+                .await?;
             provider.send_transaction(_tx_safe_multisend).await?.watch().await?;
-            provider.send_transaction(_tx_safe_l2_singleton_v150).await?.watch().await?;
+            provider
+                .send_transaction(_tx_safe_l2_singleton_v150)
+                .await?
+                .watch()
+                .await?;
         }
 
-        let code_safe_singleton_v141 = provider
-            .get_code_at(SAFE_SINGLETON_L2_ADDRESS_V141)
-            .await?;
-        let code_safe_singleton_v150 = provider
-            .get_code_at(SAFE_SINGLETON_L2_ADDRESS_V150)
-            .await?;
+        let code_safe_singleton_v141 = provider.get_code_at(SAFE_SINGLETON_L2_ADDRESS_V141).await?;
+        let code_safe_singleton_v150 = provider.get_code_at(SAFE_SINGLETON_L2_ADDRESS_V150).await?;
         let code_compatibility_handler_v150 = provider
             .get_code_at(SAFE_COMPATIBILITY_FALLBACK_HANDLER_ADRESS_V150)
             .await?;
-        assert!(!code_safe_singleton_v141.is_empty(), "Safe singleton v1.4.1 not deployed");
-        assert!(!code_safe_singleton_v150.is_empty(), "Safe singleton v1.5.0 not deployed");
-        assert!(!code_compatibility_handler_v150.is_empty(), "Safe compatibility handler v1.5.0 not deployed");
+        assert!(
+            !code_safe_singleton_v141.is_empty(),
+            "Safe singleton v1.4.1 not deployed"
+        );
+        assert!(
+            !code_safe_singleton_v150.is_empty(),
+            "Safe singleton v1.5.0 not deployed"
+        );
+        assert!(
+            !code_compatibility_handler_v150.is_empty(),
+            "Safe compatibility handler v1.5.0 not deployed"
+        );
         Ok(())
     }
 
@@ -843,9 +861,7 @@ where
     let self_address: hopr_primitive_types::prelude::Address = deployer.public().to_address();
 
     // Check if safe suite has been deployed. If so, skip this step
-    let code = provider
-        .get_code_at(SAFE_SINGLETON_ADDRESS)
-        .await?;
+    let code = provider.get_code_at(SAFE_SINGLETON_ADDRESS).await?;
 
     // only deploy contracts when needed
     if code.is_empty() {

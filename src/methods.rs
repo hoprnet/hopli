@@ -17,9 +17,10 @@ use hopr_bindings::{
         network::{EthereumWallet, TransactionBuilder},
         primitives::{Address, B256, Bytes, U256, keccak256, utils::format_units},
         providers::{
-            CallInfoTrait, CallItem, MULTICALL3_ADDRESS, MulticallBuilder, MulticallError, Provider, WalletProvider,
+            CallInfoTrait, CallItem, Identity, MULTICALL3_ADDRESS, MulticallBuilder, MulticallError, Provider,
+            RootProvider, WalletProvider,
             bindings::IMulticall3::{Call3, aggregate3Call},
-            Identity, RootProvider, fillers::*,
+            fillers::*,
         },
         rpc::types::TransactionRequest,
         signers::{Signer, local::PrivateKeySigner},
@@ -40,12 +41,11 @@ use tracing::{debug, info};
 use crate::{
     constants::{
         DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS,
-        DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE,
-        SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS,
-        SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
+        DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
+        SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
     },
+    payloads::transfer_native_token_payload,
     utils::{HelperErrors, get_create2_address},
-    payloads::{transfer_native_token_payload},
 };
 
 sol!(
@@ -652,9 +652,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     );
 
     // build the default permissions of capabilities
-    let default_target =
-        U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-            .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
     debug!("default target {:?}", default_target);
     // salt nonce
     let curr_nonce = provider
@@ -704,9 +703,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     // if node addresses are known, include nodes to the module by safe
     if let Some(nodes) = node_addresses {
         for node in nodes {
-            let node_target =
-                U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
-                    .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
+            let node_target = U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
+                .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
 
             let encoded_call = includeNodeCall {
                 nodeDefaultTarget: node_target,
@@ -1115,12 +1113,12 @@ pub async fn debug_node_safe_module_setup_main<P: Provider>(
 }
 
 pub type AnvilRpcClient = FillProvider<
-        JoinFill<
-            JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>>,
-            WalletFiller<EthereumWallet>,
-        >,
-        RootProvider,
-    >;
+    JoinFill<
+        JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>>,
+        WalletFiller<EthereumWallet>,
+    >,
+    RootProvider,
+>;
 
 /// Used for testing. Creates RPC client to the local Anvil instance.
 pub fn create_rpc_client_to_anvil(
@@ -1149,10 +1147,7 @@ mod tests {
     use std::vec;
 
     use hopr_bindings::{
-        exports::alloy::{
-            primitives::address,
-            sol_types::SolValue,
-        },
+        exports::alloy::{primitives::address, sol_types::SolValue},
         hopr_announcements::HoprAnnouncements,
         hopr_channels::HoprChannels,
         hopr_node_safe_registry::HoprNodeSafeRegistry,

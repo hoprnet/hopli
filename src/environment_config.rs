@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, ffi::OsStr, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use hopr_bindings::{
+    config::SingleNetworkContractAddresses,
     exports::alloy::{
         network::EthereumWallet,
         providers::{
@@ -18,8 +19,7 @@ use hopr_bindings::{
         rpc::client::ClientBuilder,
         signers::local::PrivateKeySigner,
         transports::http::ReqwestTransport,
-    }, 
-    config::SingleNetworkContractAddresses
+    },
 };
 use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ pub struct NetworkProviderArgs {
     #[clap(help = "Network name. E.g. monte_rosa", long, short)]
     network: String,
 
-    /// Path to the files storing contract addresses (`contracts-addresses.json`). 
+    /// Path to the files storing contract addresses (`contracts-addresses.json`).
     /// If not provided, uses embedded configuration from hopr-bindings dependency.
     #[clap(
         env = "HOPLI_CONTRACTS_ROOT",
@@ -105,8 +105,7 @@ impl NetworkProviderArgs {
     }
 
     /// get the provider object
-    pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors>
-    {
+    pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors> {
         // Build transport
         let parsed_url = url::Url::parse(self.provider_url.as_str()).unwrap();
         let transport_client = ReqwestTransport::new(parsed_url);
@@ -163,12 +162,13 @@ impl NetworkProviderArgs {
 
 #[cfg(test)]
 mod tests {
-    use hopr_bindings::exports::alloy::{
-        providers::Provider,
-    };
-    use crate::{methods::create_rpc_client_to_anvil, utils::{ContractInstances, create_anvil_at_port}};
+    use hopr_bindings::exports::alloy::providers::Provider;
 
     use super::*;
+    use crate::{
+        methods::create_rpc_client_to_anvil,
+        utils::{ContractInstances, create_anvil_at_port},
+    };
 
     #[tokio::test]
     async fn test_network_provider_with_signer() -> anyhow::Result<()> {
@@ -219,10 +219,10 @@ mod tests {
 
         // use the first funded identity of anvil
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
-        
+
         // create client
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        // deploy local contracts 
+        // deploy local contracts
         let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
             .await
             .expect("failed to deploy");
@@ -233,15 +233,13 @@ mod tests {
         let contract_addresses = SingleNetworkContractAddresses {
             chain_id: anvil.chain_id(),
             indexer_start_block_number: 0u32,
-            addresses: instances.get_contract_addresses()
+            addresses: instances.get_contract_addresses(),
         };
 
         let network_name = "anvil-localhost";
         let mut networks_map = BTreeMap::new();
         networks_map.insert(network_name.to_string(), contract_addresses);
-        let network_config = NetworkConfig {
-            networks: networks_map,
-        };
+        let network_config = NetworkConfig { networks: networks_map };
         let contract_environment_config_path =
             PathBuf::from(OsStr::new(&contracts_root_path)).join("contracts-addresses.json");
         let file_content = serde_json::to_string_pretty(&network_config).unwrap();
@@ -254,7 +252,9 @@ mod tests {
             provider_url: anvil.endpoint(),
         };
 
-        let provider = network_provider_args.get_provider_with_signer(&contract_deployer).await?;
+        let provider = network_provider_args
+            .get_provider_with_signer(&contract_deployer)
+            .await?;
 
         let chain_id = provider.get_chain_id().await?;
         assert_eq!(chain_id, anvil.chain_id());

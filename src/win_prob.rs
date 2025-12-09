@@ -17,7 +17,6 @@
 //!     --contracts-root "../ethereum/contracts" \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//! 
 //! - Convert winning probability:
 //! ```shell
 //! hopli win-prob convert --winning-probability 0.5
@@ -146,7 +145,9 @@ impl WinProbSubcommands {
     pub fn execute_convert_win_prob(winning_probability: f64) -> Result<(), HelperErrors> {
         // convert the winning probability to the format required by the contract
         let winning_probability_val = WinningProbability::try_from(winning_probability).map_err(|e| {
-            HelperErrors::ParseError(format!("Failed to convert winning probability to the required format: {e}"))
+            HelperErrors::ParseError(format!(
+                "Failed to convert winning probability to the required format: {e}"
+            ))
         })?;
         info!(
             winning_probability = %winning_probability_val,
