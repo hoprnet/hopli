@@ -120,7 +120,7 @@ impl FaucetArgs {
         let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
-        let hopr_token = HoprToken::new(a2h(contract_addresses.addresses.token), rpc_provider.clone());
+        let hopr_token = HoprToken::new(contract_addresses.addresses.token, rpc_provider.clone());
 
         // complete actions as defined in `transferOrMintHoprAndSendNativeToAmount` in `SingleActions.s.sol`
         // get token and native balances for addresses
