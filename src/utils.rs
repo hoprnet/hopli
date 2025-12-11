@@ -200,31 +200,22 @@ where
 {
     pub fn new(contract_addresses: &ContractAddresses, provider: P) -> Self {
         Self {
-            token: HoprTokenInstance::new(a2h(contract_addresses.token), provider.clone()),
-            channels: HoprChannelsInstance::new(a2h(contract_addresses.channels), provider.clone()),
-            announcements: HoprAnnouncementsInstance::new(a2h(contract_addresses.announcements), provider.clone()),
-            safe_registry: HoprNodeSafeRegistryInstance::new(
-                a2h(contract_addresses.node_safe_registry),
-                provider.clone(),
-            ),
-            price_oracle: HoprTicketPriceOracleInstance::new(
-                a2h(contract_addresses.ticket_price_oracle),
-                provider.clone(),
-            ),
+            token: HoprTokenInstance::new(contract_addresses.token, provider.clone()),
+            channels: HoprChannelsInstance::new(contract_addresses.channels, provider.clone()),
+            announcements: HoprAnnouncementsInstance::new(contract_addresses.announcements, provider.clone()),
+            safe_registry: HoprNodeSafeRegistryInstance::new(contract_addresses.node_safe_registry, provider.clone()),
+            price_oracle: HoprTicketPriceOracleInstance::new(contract_addresses.ticket_price_oracle, provider.clone()),
             win_prob_oracle: HoprWinningProbabilityOracleInstance::new(
-                a2h(contract_addresses.winning_probability_oracle),
+                contract_addresses.winning_probability_oracle,
                 provider.clone(),
             ),
-            stake_factory: HoprNodeStakeFactoryInstance::new(
-                a2h(contract_addresses.node_stake_factory),
-                provider.clone(),
-            ),
+            stake_factory: HoprNodeStakeFactoryInstance::new(contract_addresses.node_stake_factory, provider.clone()),
             module_implementation: HoprNodeManagementModuleInstance::new(
-                a2h(contract_addresses.module_implementation),
+                contract_addresses.module_implementation,
                 provider.clone(),
             ),
             node_safe_migration: HoprNodeSafeMigrationInstance::new(
-                a2h(contract_addresses.node_safe_migration),
+                contract_addresses.node_safe_migration,
                 provider.clone(),
             ),
         }
@@ -505,15 +496,15 @@ where
 {
     fn from(instances: &ContractInstances<P>) -> Self {
         Self {
-            token: h2a(*instances.token.address()),
-            channels: h2a(*instances.channels.address()),
-            announcements: h2a(*instances.announcements.address()),
-            node_safe_registry: h2a(*instances.safe_registry.address()),
-            ticket_price_oracle: h2a(*instances.price_oracle.address()),
-            winning_probability_oracle: h2a(*instances.win_prob_oracle.address()),
-            node_safe_migration: h2a(*instances.node_safe_migration.address()),
-            node_stake_factory: h2a(*instances.stake_factory.address()),
-            module_implementation: h2a(*instances.module_implementation.address()),
+            token: *instances.token.address(),
+            channels: *instances.channels.address(),
+            announcements: *instances.announcements.address(),
+            node_safe_registry: *instances.safe_registry.address(),
+            ticket_price_oracle: *instances.price_oracle.address(),
+            winning_probability_oracle: *instances.win_prob_oracle.address(),
+            node_safe_migration: *instances.node_safe_migration.address(),
+            node_stake_factory: *instances.stake_factory.address(),
+            module_implementation: *instances.module_implementation.address(),
         }
     }
 }

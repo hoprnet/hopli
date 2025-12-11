@@ -36,7 +36,7 @@ tokio = { version = "1.48.0", features = [
   "macros",
   "tracing",
 ] }
-tracing = { version = "0.1.41" }
+tracing = { version = "0.1.43" }
 tracing-subscriber = { version = "0.3.20", features = [
   "env-filter",
   "fmt",
@@ -46,7 +46,7 @@ tracing-subscriber = { version = "0.3.20", features = [
 uuid = { version = "1.18.1" }
 url = { version = "2.5.7", features = ["serde"] }
 
-hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "95289351c46a0ffd0644728a47a279ade36549fb" }
+hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "107ca1c9d838678424d72471463b0d502150a119" }
 hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
 hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", branch = "master", features = [
   "to-file",
