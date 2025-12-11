@@ -47,19 +47,19 @@ uuid = { version = "1.18.1" }
 url = { version = "2.5.7", features = ["serde"] }
 
 hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "95289351c46a0ffd0644728a47a279ade36549fb" }
-hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
-hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7", features = [
+hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
+hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", branch = "master", features = [
   "to-file",
 ] }
-hopr-crypto-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
-hopr-internal-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
-hopr-primitive-types = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
+hopr-crypto-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
+hopr-internal-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
+hopr-primitive-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
 
 [dev-dependencies]
 tempfile = "3.23.0"
 env_logger = "0.11.8"
 
-hopr-crypto-random = { git = "https://github.com/hoprnet/hoprnet", rev = "a79a32c6c8f95ade97d11b2edf43f1dd670765e7" }
+hopr-crypto-random = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
 
 # Target-specific dependencies for memory allocators
 [target.'cfg(target_os = "linux")'.dependencies]
