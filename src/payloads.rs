@@ -322,7 +322,7 @@ pub fn set_winning_probability(
 
     info!(
         winning_probability = %winning_probability_val,
-        win_prob_uint56 = %winning_probability,
+        winning_probability_input = %winning_probability,
         "Setting the global minimum winning probability"
     );
 
