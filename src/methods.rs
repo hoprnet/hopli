@@ -747,22 +747,22 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         for node in node_addresses {
             let node_target = U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
                 .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
-    
+
             let encoded_call = includeNodeCall {
                 nodeDefaultTarget: node_target,
             }
             .abi_encode();
-    
+
             let payload = prepare_safe_tx_multicall_payload_from_owner_contract(
                 safe_address,
                 module_address,
                 caller,
                 encoded_call,
             );
-    
+
             multicall_payloads.push(payload.to_call3());
         }
-    
+
         info!("Nodes inclusion multicall payload is created");
     } else {
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
