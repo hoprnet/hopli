@@ -2,7 +2,7 @@
 //! account. It can set the global minimum winning probability and read the current global minimum winning probability.
 //! Some sample commands:
 //! - Set winning probability:
-//! ```text
+//! ```shell
 //! hopli win-prob set \
 //!     --network anvil-localhost \
 //!     --contracts-root "../ethereum/contracts" \
@@ -11,13 +11,17 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! - Get winning probability:
-//! ```text
+//! ```shell
 //! hopli win-prob get \
 //!     --network anvil-localhost \
 //!     --contracts-root "../ethereum/contracts" \
 //!     --provider-url "http://localhost:8545"
 //! ```
-use clap::Parser;
+//! - Convert winning probability:
+//! ```shell
+//! hopli win-prob convert --winning-probability 0.5
+//! ```
+use clap::{Parser, builder::ValueParser};
 use hopr_bindings::{
     exports::alloy::primitives::aliases::U56, hopr_winning_probability_oracle::HoprWinningProbabilityOracle,
 };
@@ -27,8 +31,16 @@ use tracing::{debug, info};
 use crate::{
     environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, PrivateKeyArgs},
-    utils::{Cmd, HelperErrors, a2h},
+    utils::{Cmd, HelperErrors},
 };
+
+fn parse_win_prob_f64(s: &str) -> Result<f64, String> {
+    let win_prob: f64 = s.parse().map_err(|_| "Invalid number format".to_string())?;
+    if !(0.0..=1.0).contains(&win_prob) {
+        return Err("Winning probability must be between 0.0 and 1.0".into());
+    }
+    Ok(win_prob)
+}
 
 /// CLI arguments for `hopli win-prob`
 #[derive(Clone, Debug, Parser)]
@@ -56,6 +68,20 @@ pub enum WinProbSubcommands {
         #[command(flatten)]
         network_provider: NetworkProviderArgs,
     },
+
+    /// Convert the winning probability from f64 to the format required by the contract
+    #[command(visible_alias = "c")]
+    Convert {
+        /// Winning probability in f64 format
+        #[clap(
+            help = "Winning probability in f64 format (must be between 0.0 and 1.0)",
+            short = 'w',
+            long,
+            default_value_t = 1.0f64,
+            value_parser = ValueParser::new(parse_win_prob_f64)
+        )]
+        winning_probability: f64,
+    },
 }
 
 impl WinProbSubcommands {
@@ -72,7 +98,7 @@ impl WinProbSubcommands {
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_win_prob = HoprWinningProbabilityOracle::new(
-            a2h(contract_addresses.addresses.winning_probability_oracle),
+            contract_addresses.addresses.winning_probability_oracle,
             rpc_provider.clone(),
         );
 
@@ -102,7 +128,7 @@ impl WinProbSubcommands {
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_win_prob = HoprWinningProbabilityOracle::new(
-            a2h(contract_addresses.addresses.winning_probability_oracle),
+            contract_addresses.addresses.winning_probability_oracle,
             rpc_provider.clone(),
         );
 
@@ -123,6 +149,21 @@ impl WinProbSubcommands {
             "Current global minimum winning probability"
         );
         Ok(current_win_prob_f64)
+    }
+
+    pub fn execute_convert_win_prob(winning_probability: f64) -> Result<(), HelperErrors> {
+        // convert the winning probability to the format required by the contract
+        let winning_probability_val = WinningProbability::try_from(winning_probability).map_err(|e| {
+            HelperErrors::ParseError(format!(
+                "Failed to convert winning probability to the required format: {e}"
+            ))
+        })?;
+        info!(
+            winning_probability = %winning_probability_val,
+            win_prob_uint56 = U56::from_be_slice(&winning_probability_val.as_encoded()).to_string(),
+            "Converted winning probability"
+        );
+        Ok(())
     }
 }
 
@@ -145,6 +186,9 @@ impl Cmd for WinProbSubcommands {
             WinProbSubcommands::Get { network_provider } => {
                 let win_prob = WinProbSubcommands::execute_get_win_prob(network_provider).await?;
                 debug!("Current global minimum winning probability is: {}", win_prob);
+            }
+            WinProbSubcommands::Convert { winning_probability } => {
+                WinProbSubcommands::execute_convert_win_prob(winning_probability)?;
             }
         }
         Ok(())
