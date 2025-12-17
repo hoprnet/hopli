@@ -151,7 +151,7 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     predicted_module_address: Address,
     hopr_node_stake_factory_address: Address,
     hopr_channels_address: Address,
-    node_addresses: Option<Vec<Address>>,
+    node_addresses: Vec<Address>,
     nonce: U256,
     admins: Vec<Address>,
 ) -> Result<TransactionRequest, HelperErrors> {
@@ -191,8 +191,8 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     info!("Safe and module deployment multicall payload is created");
 
     // if node addresses are known, include nodes to the module by safe
-    if let Some(nodes) = node_addresses {
-        for node in nodes {
+    if !node_addresses.is_empty() {
+        for node in node_addresses {
             let node_target = U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
                 .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
 

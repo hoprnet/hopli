@@ -356,12 +356,6 @@ impl SafeModuleSubcommands {
                 .map(a2h),
         );
 
-        let node_addresses = if node_eth_addresses.is_empty() {
-            None
-        } else {
-            Some(node_eth_addresses.clone())
-        };
-
         // read private key
         let signer_private_key = private_key.read_default()?;
         // get RPC provider for the given network and environment
@@ -390,7 +384,7 @@ impl SafeModuleSubcommands {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             hopr_stake_factory,
             contract_addresses.addresses.channels,
-            node_addresses,
+            node_eth_addresses.clone(),
             admin_eth_addresses,
             U256::from(threshold),
         )

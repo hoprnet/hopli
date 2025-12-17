@@ -666,7 +666,7 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
 pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provider>(
     hopr_node_stake_factory: HoprNodeStakeFactoryInstance<Arc<P>>,
     hopr_channels_address: Address,
-    node_addresses: Option<Vec<Address>>,
+    node_addresses: Vec<Address>,
     admins: Vec<Address>,
     threshold: U256,
 ) -> Result<(SafeSingletonInstance<Arc<P>>, HoprNodeManagementModuleInstance<Arc<P>>), HelperErrors> {
@@ -743,26 +743,26 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     info!("Safe and module deployment multicall payload is created");
 
     // if node addresses are known, include nodes to the module by safe
-    if let Some(nodes) = node_addresses {
-        for node in nodes {
+    if !node_addresses.is_empty() {
+        for node in node_addresses {
             let node_target = U256::from_str(&format!("{node:?}{DEFAULT_NODE_PERMISSIONS}"))
                 .map_err(|e| HelperErrors::ParseError(format!("Invalid node_target format: {e}")))?;
-
+    
             let encoded_call = includeNodeCall {
                 nodeDefaultTarget: node_target,
             }
             .abi_encode();
-
+    
             let payload = prepare_safe_tx_multicall_payload_from_owner_contract(
                 safe_address,
                 module_address,
                 caller,
                 encoded_call,
             );
-
+    
             multicall_payloads.push(payload.to_call3());
         }
-
+    
         info!("Nodes inclusion multicall payload is created");
     } else {
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
@@ -1705,7 +1705,7 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            Some(node_addresses.clone()),
+            node_addresses.clone(),
             admin_addresses.clone(),
             U256::from(2),
         )
@@ -1774,7 +1774,7 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            None,
+            vec![],
             vec![a2h(contract_deployer.public().to_address())],
             U256::from(1),
         )
@@ -1870,7 +1870,7 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            Some(deployer_vec.clone()),
+            deployer_vec.clone(),
             deployer_vec.clone(),
             U256::from(1),
         )
@@ -1947,7 +1947,7 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            None,
+            vec![],
             deployer_vec.clone(),
             U256::from(1),
         )
@@ -2014,7 +2014,7 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            None,
+            vec![],
             deployer_vec.clone(),
             U256::from(1),
         )
@@ -2074,7 +2074,7 @@ mod tests {
         let (_safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
-            None,
+            vec![],
             deployer_vec.clone(),
             U256::from(1),
         )
