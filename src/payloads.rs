@@ -316,13 +316,19 @@ pub fn set_winning_probability(
     hopr_win_prob_oracle_address: Address,
     winning_probability: f64,
 ) -> Result<TransactionRequest, HelperErrors> {
+    // the winning probablity should be in range of 0.0 to 1.0 (inclusive)
+    if !(0.0..=1.0).contains(&winning_probability) {
+        return Err(HelperErrors::ParseError(
+            "Winning probability must be between 0.0 and 1.0".into(),
+        ));
+    }
     // convert the winning probability to the format required by the contract
     let winning_probability_val = WinningProbability::try_from(winning_probability)
         .map_err(|_| HelperErrors::ParseError("Failed to convert winning probability to the required format".into()))?;
 
     info!(
         winning_probability = %winning_probability_val,
-        win_prob_uint56 = %winning_probability,
+        win_prob_f64 = %winning_probability,
         "Setting the global minimum winning probability"
     );
 
