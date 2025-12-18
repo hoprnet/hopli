@@ -7,16 +7,16 @@
 # Last updated: 2025-08-06
 
 # Default owners for everything
-* @Teebor-Choka @tolbrino @NumberFour8 @jeandemeusy @QYuQianchen @ausias-armesto
+* @Teebor-Choka @tolbrino @NumberFour8 @jeandemeusy @QYuQianchen
 
 # GitHub Actions workflows and CI/CD
 /.github/ @ausias-armesto @tolbrino @Teebor-Choka
 
 # Top-level products
-/src/ @qYuQianchen @ausias-armesto @jeandemeusy
+/src/ @qYuQianchen @jeandemeusy
 
 # Build and configuration
-*.nix @tolbrino @ausias-armesto @Teebor-Choka
+*.nix @tolbrino @Teebor-Choka @ausias-armesto
 *.toml @Teebor-Choka @NumberFour8 @QYuQianchen
 
 # Secure changes to critical files
