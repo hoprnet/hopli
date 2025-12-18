@@ -3,7 +3,7 @@ use std::{ops::Add, str::FromStr};
 use hopr_bindings::{
     exports::alloy::{
         network::TransactionBuilder,
-        primitives::{Address, Bytes, U256},
+        primitives::{Address, Bytes, U256, aliases::U56},
         providers::{
             CallInfoTrait, MULTICALL3_ADDRESS,
             bindings::IMulticall3::{Call3, Call3Value, aggregate3Call, aggregate3ValueCall},
@@ -15,7 +15,9 @@ use hopr_bindings::{
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
     hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
     hopr_token::HoprToken::{sendCall, transferCall},
+    hopr_winning_probability_oracle::HoprWinningProbabilityOracle::setWinProbCall,
 };
+use hopr_internal_types::prelude::WinningProbability;
 use tracing::{debug, info};
 
 use crate::{
@@ -305,6 +307,38 @@ pub fn edge_node_deploy_safe_module_and_maybe_include_node(
 
     let tx = TransactionRequest::default()
         .with_to(hopr_token_address)
+        .with_input(tx_payload);
+    Ok(tx)
+}
+
+/// Set the global minimum winning probability in the HoprWinningProbabilityOracle contract
+pub fn set_winning_probability(
+    hopr_win_prob_oracle_address: Address,
+    winning_probability: f64,
+) -> Result<TransactionRequest, HelperErrors> {
+    // the winning probablity should be in range of 0.0 to 1.0 (inclusive)
+    if !(0.0..=1.0).contains(&winning_probability) {
+        return Err(HelperErrors::ParseError(
+            "Winning probability must be between 0.0 and 1.0".into(),
+        ));
+    }
+    // convert the winning probability to the format required by the contract
+    let winning_probability_val = WinningProbability::try_from(winning_probability)
+        .map_err(|_| HelperErrors::ParseError("Failed to convert winning probability to the required format".into()))?;
+
+    info!(
+        winning_probability = %winning_probability_val,
+        win_prob_f64 = %winning_probability,
+        "Setting the global minimum winning probability"
+    );
+
+    let tx_payload = setWinProbCall {
+        _newWinProb: U56::from_be_slice(&winning_probability_val.as_encoded()),
+    }
+    .abi_encode();
+
+    let tx = TransactionRequest::default()
+        .with_to(hopr_win_prob_oracle_address)
         .with_input(tx_payload);
     Ok(tx)
 }
