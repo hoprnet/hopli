@@ -16,7 +16,7 @@
 /src/ @qYuQianchen @jeandemeusy
 
 # Build and configuration
-*.nix @tolbrino @Teebor-Choka
+*.nix @tolbrino @Teebor-Choka @ausias-armesto
 *.toml @Teebor-Choka @NumberFour8 @QYuQianchen
 
 # Secure changes to critical files
