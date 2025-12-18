@@ -2227,7 +2227,7 @@ dependencies = [
  "env_logger",
  "hex",
  "hex-literal",
- "hopr-bindings 4.1.0",
+ "hopr-bindings 4.2.0",
  "hopr-chain-types",
  "hopr-crypto-keypair",
  "hopr-crypto-random",
@@ -2264,8 +2264,8 @@ dependencies = [
 
 [[package]]
 name = "hopr-bindings"
-version = "4.1.0"
-source = "git+https://github.com/hoprnet/contracts?rev=107ca1c9d838678424d72471463b0d502150a119#107ca1c9d838678424d72471463b0d502150a119"
+version = "4.2.0"
+source = "git+https://github.com/hoprnet/contracts?branch=main#f16b9d689e6e39f04773bee2f8ccc9297a040e09"
 dependencies = [
  "alloy",
  "anyhow",

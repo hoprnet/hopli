@@ -46,7 +46,7 @@ tracing-subscriber = { version = "0.3.20", features = [
 uuid = { version = "1.18.1" }
 url = { version = "2.5.7", features = ["serde"] }
 
-hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "107ca1c9d838678424d72471463b0d502150a119" }
+hopr-bindings = { git = "https://github.com/hoprnet/contracts", branch = "main" }
 hopr-chain-types = { git = "https://github.com/hoprnet/hoprnet", branch = "master" }
 hopr-crypto-keypair = { git = "https://github.com/hoprnet/hoprnet", branch = "master", features = [
   "to-file",
