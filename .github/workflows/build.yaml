@@ -20,14 +20,14 @@ concurrency:
   group: ${{ github.event.pull_request.head.ref || github.ref_name }}-build
   cancel-in-progress: true
 jobs:
-  build-docker:
+  build_docker:
     name: Build
     uses: ./.github/workflows/build-docker.yaml
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: commit
     secrets: inherit
-  build-binaries:
+  build_binaries:
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +37,7 @@ jobs:
           - name: aarch64-linux
             runner: self-hosted-hoprnet-bigger
           - name: aarch64-darwin
-            runner: macos-14 # M1 machine
+            runner: macos-15 # M1 machine
           - name: x86_64-darwin
             runner: macos-13 # Intel machine
     name: binary-${{ matrix.target.name }}
@@ -61,4 +61,4 @@ jobs:
           publish: false
           nix_cache: hopli
           nix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
+          github_token: ${{ secrets.GITHUB_TOKEN }}

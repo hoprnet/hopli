@@ -15,14 +15,14 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
-  build-docker:
+  build_docker:
     name: Build
     uses: ./.github/workflows/build-docker.yaml
     with:
       source_branch: ${{ github.ref }}
       version_type: release
     secrets: inherit
-  build-binaries:
+  build_binaries:
     strategy:
       fail-fast: false
       matrix:
@@ -46,8 +46,8 @@ jobs:
   release:
     name: Release
     needs:
-      - build-docker
-      - build-binaries
+      - build_docker
+      - build_binaries
     runs-on: self-hosted-hoprnet-small
     steps:
       - name: Harden Runner
@@ -78,3 +78,5 @@ jobs:
       - name: Upload release assets
         run: |
           gh release upload "v${{ steps.release.outputs.current_version }}" ./artifacts/* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

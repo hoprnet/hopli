@@ -73,7 +73,7 @@ jobs:
       source_branch: ${{ github.event.pull_request.base.ref }}
       version_type: 'pr'
     secrets: inherit
-  build-binaries:
+  build_binaries:
     if: github.event.pull_request.merged == true
     strategy:
       fail-fast: false
@@ -90,7 +90,7 @@ jobs:
     name: binary-${{ matrix.target.architecture }}
     uses: ./.github/workflows/build-binaries.yaml
     with:
-      source_branch: ${{ github.ref }}
+      source_branch: ${{ github.event.pull_request.base.ref }}
       runner: ${{ matrix.target.runner }}
       architecture: ${{ matrix.target.architecture }}
       version_type: pr
@@ -110,12 +110,14 @@ jobs:
           publish: true
           nix_cache: hopli
           nix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
   notify_failure:
     name: Notify in Zulip on merge pipeline failure
     needs:
       - cleanup_actions
-      - build_docker
       - cache_deps
+      - build_docker
+      - build_binaries
       - docs
     if: failure()
     runs-on: ubuntu-latest
