@@ -1,19 +1,16 @@
 #################################################################################
 # Pipeline triggered on every merged pull request to:
-# 1. Cleanup the pull request cache
+# 1. Cleanup the pull request cache and dependencies cache
 # 2. Update the latest docker tag and the release docker tag if it is part of a release
-# 3. Deploy the pull request in rotsee network
-# 4. Create the github release with changelog if it is labeled with 'release'. Close the associated milestone.
-# 5. Create the new release pull request
+# 3. Build binaries
+# 4. Publish docs
 #################################################################################
 name: Merge
 on:
-  # pull_request:
-  #   types:
-  #     - synchronize
-  pull_request_target:
+  pull_request:
     types:
       - closed
+#     - synchronize
 concurrency:
   group: merge-${{ github.event.pull_request.base.ref }}
   cancel-in-progress: false
@@ -61,59 +58,58 @@ jobs:
           gh pr edit ${{ github.event.pull_request.number }} --remove-label "deploy_nodes"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  build_docker:
-    strategy:
-      matrix:
-        package:
-          - hopli
-    name: Build ${{ matrix.package }}
-    # only run build and tag if the PR is merged, not if its closed
-    if: github.event.pull_request.merged == true
-    uses: ./.github/workflows/build-docker.yaml
-    with:
-      source_repo: ${{ github.event.pull_request.base.repo.full_name }}
-      source_branch: ${{ github.event.pull_request.base.ref }}
-      package: ${{ matrix.package }}
-      production: true
-    secrets: inherit
   cache_deps:
     name: Cache deps
     if: github.event.pull_request.merged == true
     uses: ./.github/workflows/cache-deps.yaml
     with:
-      source_repo: ${{ github.event.pull_request.base.repo.full_name }}
       source_branch: ${{ github.event.pull_request.base.ref }}
     secrets: inherit
-  create_release:
-    name: Create Release
-    if: contains(github.event.pull_request.labels.*.name, 'release')
-    uses: ./.github/workflows/create-release.yaml
-    needs:
-      - build_docker
+  build_docker:
+    name: Build
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/build-docker.yaml
     with:
-      head_branch: ${{ github.event.pull_request.head.ref }}
-      base_branch: ${{ github.event.pull_request.base.ref }}
-    secrets: inherit
-  new_release:
-    name: Open new release
-    if: contains(github.event.pull_request.labels.*.name, 'release')
-    needs:
-      - create_release
-    uses: ./.github/workflows/open-release.yaml
-    with:
-      release_type: ${{ vars.NEXT_RELEASE_TYPE }}
       source_branch: ${{ github.event.pull_request.base.ref }}
+      version_type: 'pr'
+    secrets: inherit
+  build-binaries:
+    if: github.event.pull_request.merged == true
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - architecture: x86_64-linux
+            runner: self-hosted-hoprnet-bigger
+          - architecture: aarch64-linux
+            runner: self-hosted-hoprnet-bigger
+          - architecture: aarch64-darwin
+            runner: macos-15 # M1 machine
+          - architecture: x86_64-darwin
+            runner: macos-13 # Intel machine
+    name: binary-${{ matrix.target.architecture }}
+    uses: ./.github/workflows/build-binaries.yaml
+    with:
+      source_branch: ${{ github.ref }}
+      runner: ${{ matrix.target.runner }}
+      architecture: ${{ matrix.target.architecture }}
+      version_type: pr
     secrets: inherit
   docs:
     name: Docs
     needs:
       - build_docker
-    uses: ./.github/workflows/build-docs.yaml
-    secrets: inherit
-    with:
-      source_repo: ${{ github.event.pull_request.base.repo.full_name }}
-      source_branch: ${{ github.event.pull_request.base.ref }}
-      publish: true
+    # big runner is needed because building docs involves building Rust code
+    runs-on: self-hosted-hoprnet-bigger
+    steps:
+      - name: Publish docs
+        uses: hoprnet/hopr-workflows/actions/publish-rust-docs@ausias/fix-actions
+        with:
+          source_repo: ${{ github.event.pull_request.base.repo.full_name }}
+          source_branch: ${{ github.event.pull_request.base.ref }}
+          publish: true
+          nix_cache: hopli
+          nix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
   notify_failure:
     name: Notify in Zulip on merge pipeline failure
     needs:
@@ -121,7 +117,7 @@ jobs:
       - build_docker
       - cache_deps
       - docs
-    if: ${{ failure() }}
+    if: failure()
     runs-on: ubuntu-latest
     steps:
       - name: Notify failed merge pipeline

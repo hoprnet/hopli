@@ -8,49 +8,20 @@ name: Build binaries
 on:
   workflow_call:
     inputs:
-      source_repo:
-        required: true
-        type: string
       source_branch:
         required: true
         type: string
-      binary:
-        required: true
-        type: string
       runner:
         required: true
         type: string
-      target:
+      architecture:
         required: true
         type: string
-  workflow_dispatch:
-    inputs:
-      binary:
+      version_type:
         required: true
-        description: 'Binary to build'
-        type: choice
-        options:
-          - hopli
-      runner:
-        type: choice
-        options:
-          - self-hosted-hoprnet-bigger
-          - macos-13
-          - macos-14
-        required: true
-        description: 'GH Runner to use: macos-13=x86_64-darwin and macos-14=aarch64-darwin'
-      target:
-        type: choice
-        options:
-          - x86_64-linux
-          - aarch64-linux
-          - aarch64-darwin
-          - x86_64-darwin
-        required: true
-        description: 'Architecture to build for'
-
+        type: string
 concurrency:
-  group: ${{ inputs.source_branch || github.ref_name }}-build-binary-${{ inputs.binary }}-${{ inputs.target }}
+  group: build-binary-${{ inputs.source_branch || github.ref_name }}-${{ inputs.architecture }}
   cancel-in-progress: true
 
 permissions:
@@ -60,8 +31,7 @@ permissions:
 jobs:
   binary:
     name: Binary
-    if: >-
-      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && inputs.target != '' && contains(github.event.pull_request.labels.*.name, format('binary:{0}', inputs.target)))
+    if: inputs.version_type != 'commit' || contains(github.event.pull_request.labels.*.name, format('binary:{0}', inputs.architecture))
     runs-on: ${{ github.event.inputs.runner || inputs.runner }}
     timeout-minutes: 60
     steps:
@@ -69,94 +39,61 @@ jobs:
         uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
         with:
           disable-sudo: true
-          egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-      - name: Set environment variables
-        id: vars
-        run: |
-          declare branch binary target package_suffix runner_needs_nix_setup
-          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-            echo "The workflow is triggered by other pipeline"
-            repo=${{ inputs.source_repo }}
-            branch=${{ inputs.source_branch }}
-            binary=${{ inputs.binary }}
-            target=${{ inputs.target }}
-          else
-            echo "The workflow is triggered manually"
-            repo=${{ github.repository }}
-            branch=${{ github.ref_name }}
-            binary=${{ github.event.inputs.binary }}
-            target=${{ github.event.inputs.target }}
-          fi
-          case "${target}" in
-          "x86_64-linux")
-              package_suffix="-x86_64-linux"
-              runner_needs_nix_setup=false
-              ;;
-          "aarch64-linux")
-            package_suffix="-aarch64-linux"
-            runner_needs_nix_setup=false
-            ;;
-          *)
-            package_suffix=""
-            runner_needs_nix_setup=true
-            ;;
-          esac
-          echo "Invocation parameters:"
-          echo "source_repo=${repo}" | tee -a $GITHUB_OUTPUT
-          echo "source_branch=${branch}" | tee -a $GITHUB_OUTPUT
-          echo "binary=${binary}" | tee -a $GITHUB_OUTPUT
-          echo "target=${target}" | tee -a $GITHUB_OUTPUT
-          echo "package_suffix=${package_suffix}" | tee -a $GITHUB_OUTPUT
-          echo "runner_needs_nix_setup=${runner_needs_nix_setup}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${{ inputs.runner || github.event.inputs.runner }}"
-
+          egress-policy: audit
       - name: Checkout hoprnet repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-          repository: ${{ steps.vars.outputs.source_repo }}
-          ref: ${{ steps.vars.outputs.source_branch }}
-
-      - name: Install Nix
-        if: steps.vars.outputs.runner_needs_nix_setup == 'true'
-        uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
+          ref: ${{ inputs.source_branch || github.ref_name }}
+      - name: Setup Nix
+        uses: hoprnet/hopr-workflows/actions/setup-nix@ausias/fix-actions
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          nix_path: nixpkgs=channel:nixos-24.05
-
-      - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
-        if: steps.vars.outputs.runner_needs_nix_setup == 'true'
-        with:
-          name: hoprnet
+          cache: hopli
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-        env:
-          USER: runner
+      - name: Updates build version
+        id: version
+        uses: hoprnet/hopr-workflows/actions/set-build-version@build-version-v1
+        with:
+          file: Cargo.toml
+          version_type: "${{ inputs.version_type }}"
 
-      - name: Build ${{ steps.vars.outputs.binary }} binaries
-        run: nix build -L .#${{ steps.vars.outputs.binary }}${{ steps.vars.outputs.package_suffix }}
-
-      - name: Create ${{ steps.vars.outputs.binary }} signature
+      - name: Build hopli binaries
         run: |
-          mkdir -p ${{ github.workspace }}/dist/bin
-          cp ${{ github.workspace }}/result/bin/${{ steps.vars.outputs.binary }} ${{ github.workspace }}/dist/bin/
-          nix develop -L .#ci -c bash -c 'just sign-file "${{ github.workspace }}/dist/bin/${{ steps.vars.outputs.binary }}"'
-        env:
-          GPG_HOPRNET_PRIVATE_KEY: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
-
-      - name: Publish ${{ steps.vars.outputs.binary }} binary
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+          nix build -L .#hopli-${{ inputs.architecture }}
+          mv ./result/bin/hopli result/bin/hopli-${{ inputs.architecture }}
+      - name: Setup GCP
+        if: steps.version.outputs.publish_artifact_registry || steps.version.outputs.publish_github_release
+        uses: hoprnet/hopr-workflows/actions/setup-gcp@gcp-v1
         with:
-          name: ${{ steps.vars.outputs.binary }}-${{ steps.vars.outputs.target }}
-          path: ${{ github.workspace }}/dist/bin/${{ steps.vars.outputs.binary }}
-
-      - name: Publish Github Workflow artifact hash
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+          google_credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+          install_sdk: "true"
+      - name: Sign binary
+        uses: hoprnet/hopr-workflows/actions/sign-file@ausias/fix-actions
         with:
-          name: ${{ steps.vars.outputs.binary }}-${{ steps.vars.outputs.target }}.sha256
-          path: ${{ github.workspace }}/dist/bin/${{ steps.vars.outputs.binary }}.sha256
-
-      - name: Publish Github Workflow artifact signature
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+          file: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture }}
+          gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
+      - name: Publish Artifact registry
+        if: steps.version.outputs.publish_artifact_registry || steps.version.outputs.publish_github_release
+        uses: hoprnet/hopr-workflows/actions/upload-artifact-registry@ausias/fix-actions
         with:
-          name: ${{ steps.vars.outputs.binary }}-${{ steps.vars.outputs.target }}.asc
-          path: ${{ github.workspace }}/dist/bin/${{ steps.vars.outputs.binary }}.asc
+          source: ${{ github.workspace }}/result/bin/
+          package: hopli
+          version: ${{ steps.version.outputs.build_version }}
+      - name: Upload ${{ inputs.architecture }} binary
+        if: steps.version.outputs.publish_workflow_run
+        uses: actions/upload-artifact@v4
+        with:
+          name: hopli-${{ inputs.architecture }}
+          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}
+      - name: Upload ${{ inputs.architecture }} signed binary
+        if: steps.version.outputs.publish_workflow_run
+        uses: actions/upload-artifact@v4
+        with:
+          name: hopli-${{ inputs.architecture}}.asc
+          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}.asc
+      - name: Upload ${{ inputs.architecture }} sha256 binary
+        if: steps.version.outputs.publish_workflow_run
+        uses: actions/upload-artifact@v4
+        with:
+          name: hopli-${{ inputs.architecture}}.sha256
+          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}.sha256

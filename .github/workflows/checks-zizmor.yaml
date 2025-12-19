@@ -1,14 +1,9 @@
 name: Zizmor
-env:
-  needs_nix_setup: false
 on:
   merge_group:
     types: [checks_requested]
   workflow_call:
     inputs:
-      source_repo:
-        required: true
-        type: string
       source_branch:
         required: true
         type: string
@@ -33,20 +28,12 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-          repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_branch }}
-      - name: Install Nix
-        if: env.needs_nix_setup == true
-        uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7 # v31
+      - name: Setup Nix
+        uses: hoprnet/hopr-workflows/actions/setup-nix@ausias/fix-actions
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
-        if: env.needs_nix_setup == true
-        with:
-          name: hoprnet
+          cache: hopli
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-        env:
-          USER: runner
       - name: Run zizmor
         run: nix develop -L .#ci -c bash -c "zizmor --format sarif . > results.sarif"
         env:

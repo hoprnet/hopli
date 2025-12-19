@@ -1,11 +1,11 @@
 ################################################################################
-# Main pipeline to build hoprnet artifacts
+# Main pipeline to build hopli artifacts
 ################################################################################
 name: Build
 on:
   merge_group:
     types: [checks_requested]
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - ready_for_review
@@ -21,24 +21,16 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-docker:
-    strategy:
-      matrix:
-        package:
-          - hopli
-    name: ${{ matrix.package }}
+    name: Build
     uses: ./.github/workflows/build-docker.yaml
     with:
-      source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      package: ${{ matrix.package }}
-      production: false
+      version_type: commit
     secrets: inherit
   build-binaries:
     strategy:
       fail-fast: false
       matrix:
-        binary:
-          - hopli
         target:
           - name: x86_64-linux
             runner: self-hosted-hoprnet-bigger
@@ -48,47 +40,25 @@ jobs:
             runner: macos-14 # M1 machine
           - name: x86_64-darwin
             runner: macos-13 # Intel machine
-    name: ${{ matrix.binary }}-${{ matrix.target.name }}
+    name: binary-${{ matrix.target.name }}
     uses: ./.github/workflows/build-binaries.yaml
     with:
-      source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      binary: ${{ matrix.binary }}
       runner: ${{ matrix.target.runner }}
-      target: ${{ matrix.target.name }}
-    secrets: inherit
-  package:
-    name: ${{ matrix.target.arch }}-${{ matrix.packager.package }}
-    needs: build-binaries
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - arch: x86_64-linux
-            runner: ubuntu-latest
-          - arch: aarch64-linux
-            runner: ubuntu-24.04-arm
-        packager:
-          - package: deb
-            extension: deb
-          - package: rpm
-            extension: rpm
-          - package: archlinux
-            extension: pkg.tar.zst
-    uses: ./.github/workflows/package.yaml
-    with:
-      runner: ${{ matrix.target.runner }}
-      branch: ${{ github.event.pull_request.head.ref }}
-      target: ${{ matrix.target.arch }}
-      packager: ${{ matrix.packager.package }}
-      extension: ${{ matrix.packager.extension }}
-      workflow_run_id: ${{ github.run_id }}
+      architecture: ${{ matrix.target.name }}
+      version_type: commit
     secrets: inherit
   docs:
     name: Docs
-    uses: ./.github/workflows/build-docs.yaml
-    secrets: inherit
-    with:
-      source_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      publish: false
+    # big runner is needed because building docs involves building Rust code
+    runs-on: self-hosted-hoprnet-bigger
+    steps:
+      - name: Publish docs
+        uses: hoprnet/hopr-workflows/actions/publish-rust-docs@ausias/fix-actions
+        with:
+          source_repo: ${{ github.repository }}
+          source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+          publish: false
+          nix_cache: hopli
+          nix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
