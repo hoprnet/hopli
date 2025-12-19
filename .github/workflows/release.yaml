@@ -34,7 +34,7 @@ jobs:
           - architecture: aarch64-darwin
             runner: macos-15 # M1 machine
           - architecture: x86_64-darwin
-            runner: macos-13 # Intel machine
+            runner: macos-15-intel # Intel machine
     name: binary-${{ matrix.target.architecture }}
     uses: ./.github/workflows/build-binaries.yaml
     with:
