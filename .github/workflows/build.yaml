@@ -40,7 +40,7 @@ jobs:
             runner: macos-15 # M1 machine
           - name: x86_64-darwin
             runner: macos-15-intel # Intel machine
-    name: binary-${{ matrix.target.name }}
+    name: Binary
     uses: ./.github/workflows/build-binaries.yaml
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}

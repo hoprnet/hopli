@@ -1,9 +1,7 @@
----
 #################################################################################
-# Child pipeline to build hoprnet binaries
+# Child pipeline to build binaries
 #################################################################################
 name: Build binaries
-
 
 on:
   workflow_call:
@@ -30,7 +28,7 @@ permissions:
 
 jobs:
   binary:
-    name: Binary
+    name: ${{ inputs.architecture }}
     if: inputs.version_type != 'commit' || contains(github.event.pull_request.labels.*.name, format('binary:{0}', inputs.architecture))
     runs-on: ${{ github.event.inputs.runner || inputs.runner }}
     timeout-minutes: 60
@@ -57,10 +55,11 @@ jobs:
           file: Cargo.toml
           version_type: "${{ inputs.version_type }}"
 
-      - name: Build hopli binaries
+      - name: Build binary ${{ inputs.architecture }}
         run: |
           nix build -L .#hopli-${architecture}
-          mv ./result/bin/hopli result/bin/hopli-${architecture}
+          mkdir -p ${{ github.workspace }}/artifacts
+          cp ./result/bin/hopli ${{ github.workspace }}/artifacts/hopli-${architecture}
         env:
           architecture: ${{ inputs.architecture }}
       - name: Setup GCP
@@ -72,13 +71,13 @@ jobs:
       - name: Sign binary
         uses: hoprnet/hopr-workflows/actions/sign-file@ausias/fix-actions
         with:
-          file: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture }}
+          file: ${{ github.workspace }}/artifacts/hopli-${{ inputs.architecture }}
           gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
       - name: Publish Artifact registry
         if: steps.version.outputs.publish_artifact_registry || steps.version.outputs.publish_github_release
         uses: hoprnet/hopr-workflows/actions/upload-artifact-registry@ausias/fix-actions
         with:
-          source: ${{ github.workspace }}/result/bin/
+          source: ${{ github.workspace }}/artifacts
           package: hopli
           version: ${{ steps.version.outputs.build_version }}
       - name: Upload ${{ inputs.architecture }} binary
@@ -86,16 +85,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hopli-${{ inputs.architecture }}
-          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}
+          path: ${{ github.workspace }}/artifacts/hopli-${{ inputs.architecture}}
       - name: Upload ${{ inputs.architecture }} signed binary
         if: steps.version.outputs.publish_workflow_run
         uses: actions/upload-artifact@v4
         with:
           name: hopli-${{ inputs.architecture}}.asc
-          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}.asc
+          path: ${{ github.workspace }}/artifacts/hopli-${{ inputs.architecture}}.asc
       - name: Upload ${{ inputs.architecture }} sha256 binary
         if: steps.version.outputs.publish_workflow_run
         uses: actions/upload-artifact@v4
         with:
           name: hopli-${{ inputs.architecture}}.sha256
-          path: ${{ github.workspace }}/result/bin/hopli-${{ inputs.architecture}}.sha256
+          path: ${{ github.workspace }}/artifacts/hopli-${{ inputs.architecture}}.sha256
