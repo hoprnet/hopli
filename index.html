@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="generator" content=
+  "HTML Tidy for HTML5 for Linux version 5.8.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content=
+  "width=device-width, initial-scale=1.0">
+  <meta name="generator" content="rustdoc">
+  <meta name="description" content="List of crates">
+  <title>Index of crates</title>
+  <script>
+  if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="./static.files/${f}">`).join(""))
+  </script>
+  <link rel="stylesheet" href=
+  "./static.files/normalize-9960930a.css">
+  <link rel="stylesheet" href=
+  "./static.files/rustdoc-80aa586b.css">
+  <meta name="rustdoc-vars" data-root-path="./"
+  data-static-root-path="./static.files/" data-current-crate=
+  "hopli_lib" data-themes="" data-resource-suffix=""
+  data-rustdoc-version="1.94.0-nightly (e7d44143a 2025-12-24)"
+  data-channel="nightly" data-search-js="search-9e2438ea.js"
+  data-stringdex-js="stringdex-b897f86f.js" data-settings-js=
+  "settings-c38705f0.js">
+  <script src="./static.files/storage-e2aeef58.js"></script>
+  <script defer src=
+  "./static.files/main-3e30299d.js"></script><noscript>
+  <link rel="stylesheet" href=
+  "./static.files/noscript-ffcac47a.css"></noscript>
+  <link rel="alternate icon" type="image/png" href=
+  "./static.files/favicon-32x32-eab170b8.png">
+  <link rel="icon" type="image/svg+xml" href=
+  "./static.files/favicon-044be391.svg">
+</head>
+<body class="rustdoc mod sys">
+  <!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar></rustdoc-topbar>
+  <h2><rustdoc-topbar>
+    <a href="#">Crates</a>
+  </rustdoc-topbar></h2>
+  <nav class="sidebar">
+    <div class="sidebar-crate">
+      <a class="logo-container" href="./index.html"><img class=
+      "rust-logo" src="./static.files/rust-logo-9a9549ea.svg" alt=
+      "logo"></a>
+      <h2><a href="./index.html">Rustdoc</a><span class=
+      "version">1.94.0-nightly</span></h2>
+    </div>
+    <div class="version">
+      (e7d44143a 2025-12-24)
+    </div>
+  </nav>
+  <div class="sidebar-resizer" title="Drag to resize sidebar">
+  </div>
+  <main>
+    <div class="width-limiter">
+      <section id="main-content" class="content">
+<h1 id="hopli">Hopli</h1>
+<p>CLI tool to manage HOPR identity generation, decryption, funding and
+registering to network registry.</p>
+<h2 id="installation">Installation</h2>
+<p>hopli requires contract bindings
+(<code>../ethereum/contracts/bindings</code>) which is build by foundry
+(<code>forge bind</code>)</p>
+<h2 id="commands">Commands</h2>
+<h3 id="general-arguments">General arguments</h3>
+<h4 id="identity-directory-or-path">Identity directory or path</h4>
+<p>Identities can be read from a directory or directly from a path.</p>
+<p>When reading from a directory, identity files MUST contain “id” in
+their file name to be considered as an identity file.<br />
+An additional parameter which specifies its prefix can also be
+passed.</p>
+<pre><code>    --identity-directory &quot;./test&quot; \
+    --identity-prefix node_ \</code></pre>
+<p>When reading from a path, use
+<code>--identity-from-path "./test/hopr.id"</code></p>
+<p>Path and directory can be passed at the same time. When both are
+provided, files from the directory are read first and file from path is
+read later.</p>
+<p>Note: when CREATing identities, you must pass
+<code>--identity-directory</code>. <code>--identity-from-path</code> is
+not accepted</p>
+<h4 id="password">Password</h4>
+<p>Password can be passed either as an env variable
+<code>IDENTITY_PASSWORD</code>, or via a path to the password file
+<code>--password-path</code>,
+e.g. <code>--password-path ./.pwd</code></p>
+<h4 id="private-key">Private key</h4>
+<p>Private key to signer wallet can be passed either as an env variable
+or as a command line argument <code>--private-key</code>,
+e.g. <code>--private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80</code>.</p>
+<p>Unless specified, the name of the env variable is
+<code>PRIVATE_KEY</code> by default. In commands that accept two or more
+private keys, each private key has its own specific name. E.g.
+<code>MANAGER_PRIVATE_KEY</code> for network registry commands that are
+reserved for wallets with manager privilege.</p>
+<h3 id="create-identities">Create identities</h3>
+<p>To create identities, a <a href="####Identity-directory-or-path">path
+to it</a> and a <a href="####Password">password</a> must be
+provided.</p>
+<pre><code>hopli identity create \
+  --identity-directory &quot;./test&quot; \
+  --identity-prefix nodes_ \
+  --number 2 \
+  --password-path &quot;./test/pwd&quot;</code></pre>
+<h4 id="read-identities">Read identities</h4>
+<p>Read ethereum addresses from identities. A <a
+href="####Identity-directory-or-path">path to it</a> and a <a
+href="####Password">password</a> must be provided.</p>
+<pre><code>hopli identity read \
+  --identity-directory &quot;./test&quot; \
+  --identity-prefix node_ \
+  --password-path &quot;./test/pwd&quot;</code></pre>
+<h4 id="update-identities-password">Update identities password</h4>
+<p>To update the password for identities in a specified directory, 2 <a
+href="####Password">passwords</a> must be provided:</p>
+<ul>
+<li>an old (and valid) password to the identity files. Either provided
+as cli argument <code>--password-path</code> or as an env variable
+<code>IDENTITY_PASSWORD</code></li>
+<li>a new password to the identity files. Either provided as cli
+argument <code>--new-password-path</code> or as an env variable
+<code>NEW_IDENTITY_PASSWORD</code></li>
+</ul>
+<pre><code>hopli identity update \
+  --identity-directory &quot;./test&quot; \
+  --identity-prefix node_ \
+  --password-path &quot;./test/pwd&quot; \
+  --new-password-path &quot;./test/newpwd&quot;</code></pre>
+<p>The identities will be modified inplace.</p>
+<h3 id="faucet">Faucet</h3>
+<p>To fund nodes with password, a <a
+href="####Identity-directory-or-path">path to it</a>, a <a
+href="####Password">password</a>, and a <a
+href="####Private-key">private key</a> to the faucet wallet (EOA) must
+be provided.</p>
+<p><code>--hopr-amount</code> and <code>native-amount</code> can be
+floating number</p>
+<pre><code>hopli faucet \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --address 0x0aa7420c43b8c1a7b165d216948870c8ecfe1ee1,0xd057604a14982fe8d88c5fc25aac3267ea142a08 \
+    --identity-directory &quot;./test&quot; --identity-prefix node_ \
+    --password-path &quot;./test/pwd&quot; \
+    --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+    --hopr-amount 10 --native-amount 0.1</code></pre>
+<h3 id="network-registery">Network registery</h3>
+<h4 id="register-nodes">Register nodes</h4>
+<p>A manager (EOA) of the network registry can register node and safe
+pairs to the network. Nodes’ Ethereum addresses can either be provided
+as string or read from identity files.</p>
+<p>The private key to the manager wallet (EOA) should be provided as a
+cli argument as in <a href="####Private-key">private key</a> or as an
+env variable <code>MANAGER_PRIVATE_KEY</code>,</p>
+<p>Note that when registering a node, if the said node:</p>
+<ul>
+<li>has been registered with the given safe, skip it. (It’s
+idempotent)</li>
+<li>has been registered to a different safe, remove the registration
+with the old safe and register with the new safe</li>
+<li>has not been registered to the network registry, register it.</li>
+</ul>
+<p>After the registration, manager will also call “force-sync” to set
+all the added safes to be “eligible” to the network.</p>
+<pre><code>export MANAGER_PRIVATE_KEY=&lt;bank_private_key&gt; \
+hopli network-registry manager-register \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --node-address 0x9e820e68f8c024779ebcb6cd2edda1885e1dbe1f,0xb3724772badf4d8fffa186a5ca0bea87693a6c2a \
+    --safe-address 0x0aa7420c43b8c1a7b165d216948870c8ecfe1ee1,0xd057604a14982fe8d88c5fc25aac3267ea142a08</code></pre>
+<p>with node identities in the network registry contract</p>
+<pre><code>hopli -- network-registry manager-register \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --identity-directory &quot;./test&quot; --password-path &quot;./test/pwd&quot; \
+    --node-address 0x9e820e68f8c024779ebcb6cd2edda1885e1dbe1f,0xb3724772badf4d8fffa186a5ca0bea87693a6c2a \
+    --safe-address 0x0aa7420c43b8c1a7b165d216948870c8ecfe1ee1,0x0aa7420c43b8c1a7b165d216948870c8ecfe1ee1,0x0aa7420c43b8c1a7b165d216948870c8ecfe1ee1,0xd057604a14982fe8d88c5fc25aac3267ea142a08,0xd057604a14982fe8d88c5fc25aac3267ea142a08 \
+    --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80</code></pre>
+<h4 id="deregister-nodes">Deregister nodes</h4>
+<p>A manager (EOA) of the network registry can remove node and safe
+pairs from the network. Nodes’ Ethereum addresses can either be provided
+as string or read from identity files.</p>
+<p>The private key to the manager wallet (EOA) should be provided as a
+cli argument as in <a href="####Private-key">private key</a> or as an
+env variable <code>MANAGER_PRIVATE_KEY</code>,</p>
+<p>If the node address has not been registered in the network registry
+contract, it’s will be skipped.</p>
+<pre><code>hopli -- network-registry manager-deregister \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --node-address 0x9e820e68f8c024779ebcb6cd2edda1885e1dbe1f,0xb3724772badf4d8fffa186a5ca0bea87693a6c2a \
+    --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80</code></pre>
+<h4 id="sync-eligibility">Sync eligibility</h4>
+<p>A manager (EOA) of the network registry can forcely set eligibility
+of safes.</p>
+<p>The private key to the manager wallet (EOA) should be provided as a
+cli argument as in <a href="####Private-key">private key</a> or as an
+env variable <code>MANAGER_PRIVATE_KEY</code>,</p>
+<pre><code>hopli -- network-registry manager-force-sync \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --node-address 0x9e820e68f8c024779ebcb6cd2edda1885e1dbe1f,0xb3724772badf4d8fffa186a5ca0bea87693a6c2a \
+    --eligibility true \
+    --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80</code></pre>
+<h3 id="safe-module">Safe module</h3>
+<p>To launch a HOPR node, it requires a Safe with HOPR node management
+module to be pre-established.<br />
+Such a safe is designed to hold assets (wxHOPR tokens in particular) so
+that funds are held outside of node for better security.<br />
+HOPR node management module is a plugin to the safe so that permitted
+nodes can interact with the Safe to transfer funds between the said Safe
+and the HoprChannels smart contract.</p>
+<p>The private key to the deployer wallet (EOA) should be provided as a
+cli argument <code>--private-key</code> as in <a
+href="####Private-key">private key</a> or as an env variable
+<code>PRIVATE_KEY</code>.</p>
+<p>The private key to the manager wallet (EOA) should be provided as a
+cli argument <code>--manager-private-key</code> as in <a
+href="####Private-key">private key</a> or as an env variable
+<code>MANAGER_PRIVATE_KEY</code>.</p>
+<h4 id="create-express-create-and-setup-a-safe-and-a-module">Create:
+express create and setup a safe and a module</h4>
+<p>Express create a safe and a module instances, and</p>
+<ul>
+<li>set default permissions to scope channels and token contracts as
+targets.</li>
+<li>add announcement as a permitted target in the deployed module
+proxy</li>
+<li>approve token transfer to be done for the safe by channels
+contracts</li>
+<li>if node addresses are known, include nodes to the module by the
+safe</li>
+<li>set desired threshold</li>
+<li>if no <code>admin-address</code> is provided, the only admin will be
+the caller (wallet of the <code>private-key</code>)</li>
+<li>fund safe with wxHOPR tokens</li>
+<li>if node addresses are known, fund nodes with native tokens</li>
+<li>if node addresses are known and a manager private key is proivded,
+add created safe and node to the network registry.</li>
+</ul>
+<pre><code>hopli safe-module create \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --identity-directory &quot;./test&quot; \
+    --password-path &quot;./test/pwd&quot; \
+    --admin-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+    --allowance 10.5 \
+    --hopr-amount 10 \
+    --native-amount 0.1 \
+    --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+    --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d</code></pre>
+<h4
+id="migrate-make-safe-and-module-compatible-with-a-new-network">Migrate:
+make safe and module compatible with a new network</h4>
+<p>Migrate an existing set of node(d) with safe and module to a new
+network:</p>
+<ul>
+<li>add the Channel contract of the new network to the module as target
+and set default permissions.</li>
+<li>add the Announcement contract as target to the module</li>
+<li>approve HOPR tokens of the Safe proxy to be transferred by the new
+Channels contract</li>
+<li>Use the manager wallet to add nodes and Safes to the Network
+Registry contract of the new network.</li>
+</ul>
+<pre><code>hopli safe-module migrate \
+    --network anvil-localhost2 \
+    --contracts-root &quot;../ethereum/contracts&quot; \
+    --identity-directory &quot;./test&quot; \
+    --password-path &quot;./test/pwd&quot; \
+    --safe-address 0x6a64fe01c3aba5bdcd04b81fef375369ca47326f \
+    --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+    --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+    --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d</code></pre>
+<h4
+id="move-move-registered-nodes-to-a-new-pair-of-safe-and-module">Move:
+move registered nodes to a new pair of safe and module</h4>
+<p>For each node, if the node has been registered to the
+NodeSafeRegistry, deregister itself and register it to the new pair of
+safe and module.</p>
+<ul>
+<li>use old safes to deregister nodes from Node-safe registry</li>
+<li>use the new safe to include nodes to the module</li>
+<li>use manager wallet to deregister nodes from the network
+registry</li>
+<li>use manager wallet to register nodes with new safes to the network
+regsitry</li>
+</ul>
+<pre><code>hopli safe-module safe-module move \
+    --network anvil-localhost \
+    --contracts-root &quot;../ethereum/contracts&quot;  \
+    --old-module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+    --new-safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+    --new-module-address 0x3086c20265cf742b169b05cd0eae1941455e4e9f \
+    --node-address 0x93a50B0fFF7b4ED36A3C6445e280E72AC2AEFc51,0x58033D3074D001a32bF379801eaf8969817fFfCf,0xeEDaab91158928647a9270Fe290897eBB1230250 \
+    --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+    --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d</code></pre>
+<h2 id="examples">Examples</h2>
+<h3
+id="create-read-identity-and-make-it-eligible-for-rotsee-network">Create,
+read identity and make it eligible for rotsee network</h3>
+<p>In this guide, you will create an identity, retrieve its peerID and
+node address, and make the identity eligible for the Rotsee network.</p>
+<ol type="1">
+<li>Clone the <code>hoprnet</code> repository to your machine and
+navigate to the <code>hoprnet</code> folder.</li>
+<li>Execute the following command to allow the terminal to use the
+default scripts in the <strong>hoprnet</strong> folder:
+<code>direnv allow</code></li>
+<li>Build the package: <code>cargo build --release</code>.</li>
+<li>Modify the following variables to suit your setup
+<code>IDENTITY_PASSWORD</code>, <code>PRIVATE_KEY</code> &amp;
+<code>MANAGER_PRIVATE_KEY</code>:</li>
+</ol>
+<pre><code>export PATH=&quot;./target/release:${PATH}&quot;
+export RUST_BACKTRACE=full
+export HOPRD_NETWORK=rotsee
+export IDENTITY_PASSWORD=&lt;your-secure-password-here&gt; # Replace with your own secure password
+export PRIVATE_KEY=0x0000000000000000000000000000000000000000000000000000000000000000 # Replace with Deployer Private Key
+export MANAGER_PRIVATE_KEY=0x0000000000000000000000000000000000000000000000000000000000000000 # Replace with Manager Private Key</code></pre>
+<p>After making the necessary adjustments, copy the entire block of code
+and execute it in your terminal.</p>
+<ol start="5" type="1">
+<li>Execute the following command to create an identity file in the
+<code>new_identities</code> folder:</li>
+</ol>
+<pre><code>hopli identity create --identity-directory &quot;./new_identities&quot; --identity-prefix nodes_ --number 1</code></pre>
+<ol start="6" type="1">
+<li>Create a safe, module instances and link the recently created
+identity by executing the following command:</li>
+</ol>
+<pre><code>hopli safe-module create --network ${HOPRD_NETWORK} --contracts-root &quot;./ethereum/contracts&quot;  --provider-url https://gnosis.rpc-provider.prod.hoprnet.link --identity-directory &quot;./new_identities&quot; --allowance 10.5 --hopr-amount 1 --native-amount 0.1</code></pre>
+<ol start="7" type="1">
+<li>Read the identity file to retrieve the PeerID and native address by
+executing the following command (OPTIONAL):</li>
+</ol>
+<pre><code>hopli identity read --identity-directory &quot;./new_identities&quot; --identity-prefix nodes_</code></pre>
+<h2 id="flake-environment"><code>flake</code> environment</h2>
+<h3 id="documentation">Documentation</h3>
+<pre><code>nix build .#hopli-man
+man ./result/share/man/man1/hopli.1.gz</code></pre>
+        <div class="main-heading">
+          <h1>List of all
+          crates</h1><rustdoc-toolbar></rustdoc-toolbar>
+        </div>
+        <ul class="all-items">
+          <li>
+            <a href="hopli/index.html">hopli</a>
+          </li>
+          <li>
+            <a href="hopli_lib/index.html">hopli_lib</a>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </main><!--{"start":2399,"fragment_lengths":[45,53]}-->
+</body>
+</html>
