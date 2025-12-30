@@ -1,64 +1,73 @@
-################################################################################
-# Main pipeline to build hopli artifacts
-################################################################################
+#################################################################################
+# Pipeline to build on pull requests                                            #
+#################################################################################
 name: Build
 on:
-  merge_group:
-    types: [checks_requested]
   pull_request:
     types:
       - opened
-      - ready_for_review
-      - reopened
-      - review_requested
       - synchronize
-permissions:
-  contents: write
-  actions: write
-  security-events: write
+      - reopened
+      - ready_for_review
 concurrency:
-  group: ${{ github.event.pull_request.head.ref || github.ref_name }}-build
+  group: ${{ github.ref }}-build
   cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
 jobs:
-  build_docker:
-    name: Build
-    uses: ./.github/workflows/build-docker.yaml
+  build-docker:
+    name: Build docker ${{ matrix.architecture }}
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@ausias/fix-actions
+    strategy:
+      matrix:
+        include:
+          - architecture: x86_64-linux
+            command: nix run -L .#hopli-docker-build-and-upload
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      version_type: commit
-    secrets: inherit
-  build_binaries:
+      version_type: "commit"
+      architecture: ${{ matrix.architecture }}
+      cachix_cache_name: "hopli"
+      build_file: "Cargo.toml"
+      build_command: ${{ matrix.command }}
+      docker_image_name: "hopli"
+    secrets:
+      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
+  build-docker-manifest:
+    name: Docker manifest
+    needs: build-docker
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@ausias/fix-actions
+    with:
+      version_type: "commit"
+      docker_image_name: "hopli"
+      docker_version: ${{ needs.build-docker.outputs.docker_version }}
+    secrets:
+      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
+      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
+  build-binaries:
+    name: Build binary ${{ matrix.architecture }}
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - name: x86_64-linux
+        include:
+          - architecture: x86_64-linux
             runner: self-hosted-hoprnet-bigger
-          - name: aarch64-linux
-            runner: self-hosted-hoprnet-bigger
-          - name: aarch64-darwin
-            runner: macos-15 # M1 machine
-          - name: x86_64-darwin
-            runner: macos-15-intel # Intel machine
-    name: Binary
-    uses: ./.github/workflows/build-binaries.yaml
+            build_command: nix build -L .#hopli-x86_64-linux
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@ausias/fix-actions
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      runner: ${{ matrix.target.runner }}
-      architecture: ${{ matrix.target.name }}
-      version_type: commit
-    secrets: inherit
-  docs:
-    name: Docs
-    # big runner is needed because building docs involves building Rust code
-    runs-on: self-hosted-hoprnet-bigger
-    steps:
-      - name: Publish docs
-        uses: hoprnet/hopr-workflows/actions/publish-rust-docs@ausias/fix-actions
-        with:
-          source_repo: ${{ github.repository }}
-          source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-          publish: false
-          nix_cache: hopli
-          nix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      version_type: "commit"
+      architecture: ${{ matrix.architecture }}
+      cachix_cache_name: "hopli"
+      build_file: "Cargo.toml"
+      build_command: ${{ matrix.build_command }}
+      binary: hopli
+      runner: ${{ matrix.runner }}
+    secrets:
+      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
