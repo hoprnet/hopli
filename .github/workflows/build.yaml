@@ -23,6 +23,7 @@ jobs:
         include:
           - architecture: x86_64-linux
             command: nix run -L .#hopli-docker-build-and-upload
+            debug_command: nix run -L .#hopli-dev-docker-build-and-upload
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: "commit"
@@ -30,6 +31,7 @@ jobs:
       cachix_cache_name: "hopli"
       build_file: "Cargo.toml"
       build_command: ${{ matrix.command }}
+      build_debug_command: ${{ matrix.debug_command }}
       docker_image_name: "hopli"
     secrets:
       gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
