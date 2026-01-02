@@ -1664,12 +1664,7 @@ mod tests {
 
         let module_address_predicted_from_sc = instances
             .stake_factory
-            .predictModuleAddress_1(
-                caller,
-                nonce.into(),
-                safe_address,
-                default_target.into(),
-            )
+            .predictModuleAddress_1(caller, nonce.into(), safe_address, default_target.into())
             .call()
             .await?;
         info!(
