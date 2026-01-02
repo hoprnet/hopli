@@ -199,14 +199,96 @@ fn get_safe_transaction_hash(
         nonce,                       // _nonce
     )
         .abi_encode();
-
+    debug!("encoded {:?}", hex::encode(&encoded));
+    debug!("nonce {:?}", &nonce);
+    
     let safe_hash = keccak256(encoded);
-
+    debug!("safe_hash {:?}", hex::encode(&safe_hash));
+    
     let encoded_transaction_data = (hex!("1901"), domain_separator, safe_hash).abi_encode_packed();
+    debug!("encoded_transaction_data {:?}", hex::encode(&encoded_transaction_data));
 
     let transaction_hash = keccak256(encoded_transaction_data);
     debug!("transaction_hash {:?}", hex::encode(transaction_hash));
     transaction_hash.0
+}
+
+/// Use safe to delegatecall to multisend contract
+/// Note that when no additional signature is provided, the safe must have a threshold of one,
+/// so that the transaction can be executed.
+/// Note that the refund address is the caller (safe owner) wallet
+pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    signer_key: ChainKeypair,
+    multisend_contract: Address,
+    multisend_txns: Vec<MultisendTransaction>,
+    chain_id: U256,
+    nonce: U256,
+) -> Result<(), HelperErrors> {
+    // get signer
+    let signer = safe.provider().default_signer_address();
+    // let signer = safe.client().default_sender().expect("client must have a sender");
+    let wallet = PrivateKeySigner::from_slice(signer_key.secret().as_ref()).expect("failed to construct wallet");
+
+    // prepare a safe transaction:
+    // 1. calculate total value
+    let total_value = multisend_txns
+        .clone()
+        .into_iter()
+        .fold(U256::ZERO, |acc, cur| acc.add(cur.value));
+    // 2. prepare tx payload
+    let tx_payload = MultisendTransaction::build_multisend_tx(multisend_txns);
+    let multisend_payload = multiSendCall {
+        transactions: tx_payload.into(),
+    }
+    .abi_encode();
+    // 3. get domain separator
+    let domain_separator = get_domain_separator(chain_id, *safe.address());
+
+    debug!("multisend_payload {:?}", hex::encode(&multisend_payload));
+
+    // get transaction hash
+    let transaction_hash = get_safe_transaction_hash(
+        multisend_contract,
+        total_value,
+        multisend_payload.clone(),
+        SafeTxOperation::DelegateCall,
+        signer,
+        nonce,
+        domain_separator,
+    );
+
+    // sign the transaction
+    let signature = wallet
+        .sign_hash(&B256::from_slice(&transaction_hash))
+        .await
+        .unwrap_or_else(|_| panic!("failed to sign a transaction hash"));
+    debug!("signature {:?}", hex::encode(signature.as_bytes()));
+
+    // execute the transaction
+    let tx_receipt = safe
+        .execTransaction(
+            multisend_contract,
+            total_value,
+            multisend_payload.into(),
+            SafeTxOperation::DelegateCall.into(),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            Address::ZERO,
+            signer,
+            Bytes::from(signature.as_bytes()),
+        )
+        .send()
+        .await?
+        // .unwrap_or_else(|_| panic!("failed to exeute a pending transaction"))
+        .get_receipt()
+        .await?;
+
+    tx_receipt
+        .decoded_log::<SafeSingleton::ExecutionSuccess>()
+        .ok_or(HelperErrors::MultiSendError)?;
+    Ok(())
 }
 
 /// Use safe to delegatecall to multisend contract
@@ -1038,6 +1120,7 @@ pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProv
     safe: SafeSingletonInstance<Arc<P>>,
     old_module_address: Address,
     channels_address: Address,
+    safe_migration_contract_address: Address,
     deployment_nonce: U256,
     node_addresses: Vec<Address>,
     owner_chain_key: ChainKeypair,
@@ -1058,7 +1141,7 @@ pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProv
         .abi_encode()
         .into(),
         tx_operation: SafeTxOperation::DelegateCall,
-        to: *safe.address(),
+        to: safe_migration_contract_address,
         value: U256::ZERO,
     }];
 
@@ -1081,6 +1164,7 @@ pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProv
 pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     channels_address: Address,
+    safe_migration_contract_address: Address,
     deployment_nonce: U256,
     node_addresses: Vec<Address>,
     owner_chain_key: ChainKeypair,
@@ -1101,7 +1185,7 @@ pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
         .abi_encode()
         .into(),
         tx_operation: SafeTxOperation::DelegateCall,
-        to: *safe.address(),
+        to: safe_migration_contract_address,
         value: U256::ZERO,
     }];
 

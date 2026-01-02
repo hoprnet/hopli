@@ -884,6 +884,7 @@ impl SafeModuleSubcommands {
             safe.clone(),
             module_addr,
             contract_addresses.addresses.channels,
+            contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
             signer_private_key,
@@ -942,6 +943,7 @@ impl SafeModuleSubcommands {
         create_new_module_and_include_nodes(
             safe.clone(),
             contract_addresses.addresses.channels,
+            contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
             signer_private_key,
