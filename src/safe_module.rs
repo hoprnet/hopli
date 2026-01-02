@@ -33,7 +33,7 @@
 //!     - Get the owner of the module
 //! - [SafeModuleSubcommands::Replace] replaces an old module with a new module (v4 compatible) and include nodes in the
 //!   new one.
-//! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and add nodes to the new module.
+//! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and adds nodes to the new module.
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
 //!
 //! Some sample commands
@@ -107,7 +107,7 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
-//! - Create a new module (v4 compatible) and add nodes to the new module
+//! - Create a new module (v4 compatible) and adds nodes to the new module
 //! ```text
 //! hopli safe-module new-module \
 //!     --network anvil-localhost \
@@ -398,7 +398,7 @@ pub enum SafeModuleSubcommands {
         private_key: PrivateKeyArgs,
     },
 
-    /// Create a new module (v4 compatible) and add nodes to the new module
+    /// Create a new module (v4 compatible) and adds nodes to the new module
     #[command(visible_alias = "nm")]
     NewModule {
         /// Network name, contracts config file root, and customized provider, if available
@@ -830,7 +830,7 @@ impl SafeModuleSubcommands {
         Ok(())
     }
 
-    /// Execute the command, which creates a new module (v4 compatible) and add nodes to the new module
+    /// Execute the command, which creates a new module (v4 compatible) and adds nodes to the new module
     /// The old module will be removed from the Safe
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_safe_module_replace(
@@ -892,7 +892,7 @@ impl SafeModuleSubcommands {
         Ok(())
     }
 
-    /// Execute the command, which creates a new module (v4 compatible) and add nodes to the new module
+    /// Execute the command, which creates a new module (v4 compatible) and adds nodes to the new module
     /// The old module is kept with the Safe
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_safe_create_new_module(
