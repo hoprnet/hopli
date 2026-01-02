@@ -21,7 +21,6 @@
 //!     - approve HOPR tokens of the Safe proxy to be transferred by the new Channels contract
 //!     - Use the manager wallet to add nodes and Safes to the Network Registry contract of the new network.
 //! - [SafeModuleSubcommands::Debug] goes through a series of checks to debug the setup of a node and safe.
-//!
 //! It checks the following:
 //!     - node xDAI balance
 //!     - If node has been included on Network Registry
@@ -32,9 +31,12 @@
 //!     - if node is included in the module
 //!     - Get all the targets of the safe (then check if channel and announcement are there)
 //!     - Get the owner of the module
-//!
 //! You need to enable the INFO level of the tracing logger to see the output of the debug command.
-//!
+//! //! - [SafeModuleSubcommands::Replace] replaces an old module with a new module (v4 compatible) and include 
+//! nodes in the new one.
+//! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and add nodes to the new module.
+//! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
+//! 
 //! Some sample commands
 //! - Express creation of a safe and a module
 //! ```text
@@ -88,6 +90,46 @@
 //!     --password-path "./test/pwd" \
 //!     --safe-address 0x6a64fe01c3aba5bdcd04b81fef375369ca47326f \
 //!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+//!     --provider-url "http://localhost:8545"
+//! ```
+//! 
+//! - Replace a module with a new module (v4 compatible) and include nodes in the new one
+//! ```text
+//! hopli safe-module replace \
+//!     --network anvil-localhost \
+//!     --contracts-root "../ethereum/contracts" \
+//!     --identity-directory "./test" \
+//!     --password-path "./test/pwd" \
+//!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --old-module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+//!     --deployment-nonce 123456 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "http://localhost:8545"
+//! ```
+//! 
+//! - Create a new module (v4 compatible) and add nodes to the new module
+//! ```text
+//! hopli safe-module new-module \
+//!     --network anvil-localhost \
+//!     --contracts-root "../ethereum/contracts" \
+//!     --identity-directory "./test" \
+//!     --password-path "./test/pwd" \
+//!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --deployment-nonce 123456 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "http://localhost:8545"
+//! ```
+//! 
+//! - Add a new contract target to the module
+//! ```text
+//! hopli safe-module add-target \
+//!     --network anvil-localhost \
+//!     --contracts-root "../ethereum/contracts" \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
 use std::str::FromStr;
@@ -346,7 +388,7 @@ pub enum SafeModuleSubcommands {
         #[clap(
             help = "Random nonce to be used for the new module deployment",
             long,
-            short = 'n',
+            short = 'y',
             value_parser = RangedU64ValueParser::<u64>::new().range(0..=u64::MAX)
         )]
         deployment_nonce: u64,
@@ -385,7 +427,7 @@ pub enum SafeModuleSubcommands {
         #[clap(
             help = "Random nonce to be used for the new module deployment",
             long,
-            short = 'n',
+            short = 'y',
             value_parser = RangedU64ValueParser::<u64>::new().range(0..=u64::MAX)
         )]
         deployment_nonce: u64,
