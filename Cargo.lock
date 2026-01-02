@@ -2220,14 +2220,14 @@ dependencies = [
 
 [[package]]
 name = "hopli"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "clap",
  "env_logger",
  "hex",
  "hex-literal",
- "hopr-bindings 4.2.0",
+ "hopr-bindings 4.3.0",
  "hopr-chain-types",
  "hopr-crypto-keypair",
  "hopr-crypto-random",
@@ -2264,15 +2264,19 @@ dependencies = [
 
 [[package]]
 name = "hopr-bindings"
-version = "4.2.0"
-source = "git+https://github.com/hoprnet/contracts?branch=main#f16b9d689e6e39f04773bee2f8ccc9297a040e09"
+version = "4.3.0"
+source = "git+https://github.com/hoprnet/contracts?branch=main#c897d2a947440878708bc8a285d7f6786406e80a"
 dependencies = [
  "alloy",
  "anyhow",
  "const_format",
+ "hex-literal",
  "serde",
  "serde_json",
  "serde_with",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

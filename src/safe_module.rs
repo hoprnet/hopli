@@ -106,9 +106,11 @@ use crate::{
     environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
-        SafeSingleton, debug_node_safe_module_setup_main, debug_node_safe_module_setup_on_balance_and_registries,
-        deploy_safe_module_with_targets_and_nodes, deregister_nodes_from_node_safe_registry_and_remove_from_module,
-        include_nodes_to_module, migrate_nodes, transfer_native_tokens, transfer_or_mint_tokens,
+        SafeSingleton, add_new_network_target_to_module, create_new_module_and_include_nodes,
+        create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
+        debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
+        deregister_nodes_from_node_safe_registry_and_remove_from_module, include_nodes_to_module, migrate_nodes,
+        transfer_native_tokens, transfer_or_mint_tokens,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -311,6 +313,108 @@ pub enum SafeModuleSubcommands {
         /// module address that the nodes move to
         #[clap(help = "New managing module to which all the nodes move", long, short = 'm')]
         module_address: String,
+    },
+    /// Replace an old module with a new module (v4 compatible) and include nodes in the new one
+    #[command(visible_alias = "rp")]
+    Replace {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// safe address
+        #[clap(help = "Safe address where nodes are associated with", long, short = 's')]
+        safe_address: String,
+
+        /// old module address
+        #[clap(help = "The old module address", long, short = 'u')]
+        old_module_address: String,
+
+        /// Random nonce to be used for the new module deployment
+        #[clap(
+            help = "Random nonce to be used for the new module deployment",
+            long,
+            short = 'n',
+            value_parser = RangedU64ValueParser::<u64>::new().range(0..=u64::MAX)
+        )]
+        deployment_nonce: u64,
+
+        /// Access to the private key, of which the wallet either contains sufficient assets
+        /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Create a new module (v4 compatible) and add nodes to the new module
+    #[command(visible_alias = "nm")]
+    NewModule {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// safe address
+        #[clap(help = "Safe address where nodes are associated with", long, short = 's')]
+        safe_address: String,
+
+        /// Random nonce to be used for the new module deployment
+        #[clap(
+            help = "Random nonce to be used for the new module deployment",
+            long,
+            short = 'n',
+            value_parser = RangedU64ValueParser::<u64>::new().range(0..=u64::MAX)
+        )]
+        deployment_nonce: u64,
+
+        /// Access to the private key, of which the wallet either contains sufficient assets
+        /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Add a new contract target to the module
+    #[command(visible_alias = "at")]
+    AddTarget {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// safe address
+        #[clap(help = "Safe address where nodes are associated with", long, short = 's')]
+        safe_address: String,
+
+        /// HOPR node management module addresses
+        #[clap(help = "HOPR node management module addresses", long, short = 'm')]
+        module_address: String,
+
+        /// Access to the private key, of which the wallet either contains sufficient assets
+        /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
     },
 }
 
@@ -569,8 +673,9 @@ impl SafeModuleSubcommands {
         // parse safe and module addresses
         let safe_addr = Address::from_str(&safe_address)
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
-        let module_addr = Address::from_str(&module_address)
-            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
+        let module_addr = Address::from_str(&module_address).map_err(|_| {
+            HelperErrors::InvalidAddress(format!("Cannot parse module address address {module_address:?}"))
+        })?;
 
         // read private key
         let signer_private_key = private_key.read_default()?;
@@ -643,8 +748,9 @@ impl SafeModuleSubcommands {
         // parse safe and module addresses
         let safe_addr = Address::from_str(&safe_address)
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
-        let module_addr = Address::from_str(&module_address)
-            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
+        let module_addr = Address::from_str(&module_address).map_err(|_| {
+            HelperErrors::InvalidAddress(format!("Cannot parse module address address {module_address:?}"))
+        })?;
 
         // get RPC provider for the given network and environment
         let rpc_provider = network_provider.get_provider_without_signer().await?;
@@ -682,6 +788,162 @@ impl SafeModuleSubcommands {
             .await
             .map_err(HelperErrors::MulticallError)?;
         }
+        Ok(())
+    }
+
+    /// Execute the command, which creates a new module (v4 compatible) and add nodes to the new module
+    /// The old module will be removed from the Safe
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_safe_module_replace(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        safe_address: String,
+        old_module_address: String,
+        deployment_nonce: U256,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        // read all the node addresses
+        info!("Reading all the node addresses...");
+        let mut node_eth_addresses: Vec<Address> = Vec::new();
+        if let Some(addresses) = node_address {
+            node_eth_addresses.extend(
+                addresses
+                    .split(',')
+                    .map(|addr| {
+                        Address::from_str(addr)
+                            .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        // if local identity dirs/path is provided, read addresses from identity files
+        node_eth_addresses.extend(
+            local_identity
+                .to_addresses()
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
+                .into_iter()
+                .map(a2h),
+        );
+
+        // parse safe and module addresses
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+        let module_addr = Address::from_str(&old_module_address).map_err(|_| {
+            HelperErrors::InvalidAddress(format!(
+                "Cannot parse old module address address {old_module_address:?}"
+            ))
+        })?;
+        // read private key
+        let signer_private_key = private_key.read_default()?;
+        // get RPC provider for the given network and environment
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+
+        // use the safe to create a new module and include nodes. The old module will be removed from the Safe
+        create_new_module_include_nodes_and_remove_old_module(
+            safe.clone(),
+            module_addr,
+            contract_addresses.addresses.channels,
+            deployment_nonce,
+            node_eth_addresses.clone(),
+            signer_private_key,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Execute the command, which creates a new module (v4 compatible) and add nodes to the new module
+    /// The old module is kept with the Safe
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_safe_create_new_module(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        safe_address: String,
+        deployment_nonce: U256,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        // read all the node addresses
+        info!("Reading all the node addresses...");
+        let mut node_eth_addresses: Vec<Address> = Vec::new();
+        if let Some(addresses) = node_address {
+            node_eth_addresses.extend(
+                addresses
+                    .split(',')
+                    .map(|addr| {
+                        Address::from_str(addr)
+                            .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        // if local identity dirs/path is provided, read addresses from identity files
+        node_eth_addresses.extend(
+            local_identity
+                .to_addresses()
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
+                .into_iter()
+                .map(a2h),
+        );
+
+        // parse safe address
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+
+        // read private key
+        let signer_private_key = private_key.read_default()?;
+        // get RPC provider for the given network and environment
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+
+        // use the safe to create a new module and include nodes. The old module will be removed from the Safe
+        create_new_module_and_include_nodes(
+            safe.clone(),
+            contract_addresses.addresses.channels,
+            deployment_nonce,
+            node_eth_addresses.clone(),
+            signer_private_key,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Execute the command, which include a new channel target in an existing module
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_safe_create_add_new_target(
+        network_provider: NetworkProviderArgs,
+        safe_address: String,
+        module_address: String,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        // parse safe and module address
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+        let module_addr = Address::from_str(&module_address).map_err(|_| {
+            HelperErrors::InvalidAddress(format!("Cannot parse module address address {module_address:?}"))
+        })?;
+
+        // read private key
+        let signer_private_key = private_key.read_default()?;
+        // get RPC provider for the given network and environment
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+
+        // use the safe to create a new module and include nodes. The old module will be removed from the Safe
+        add_new_network_target_to_module(
+            safe.clone(),
+            module_addr,
+            contract_addresses.addresses.channels,
+            signer_private_key,
+        )
+        .await?;
         Ok(())
     }
 }
@@ -775,6 +1037,58 @@ impl Cmd for SafeModuleSubcommands {
                     node_address,
                     safe_address,
                     module_address,
+                )
+                .await
+            }
+            SafeModuleSubcommands::Replace {
+                network_provider,
+                local_identity,
+                node_address,
+                safe_address,
+                old_module_address,
+                deployment_nonce,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_safe_module_replace(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    safe_address,
+                    old_module_address,
+                    U256::from(deployment_nonce),
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::NewModule {
+                network_provider,
+                local_identity,
+                node_address,
+                safe_address,
+                deployment_nonce,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_safe_create_new_module(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    safe_address,
+                    U256::from(deployment_nonce),
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::AddTarget {
+                network_provider,
+                safe_address,
+                module_address,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_safe_create_add_new_target(
+                    network_provider,
+                    safe_address,
+                    module_address,
+                    private_key,
                 )
                 .await
             }

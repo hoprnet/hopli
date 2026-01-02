@@ -29,7 +29,10 @@ use hopr_bindings::{
     },
     hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
-        removeNodeCall, scopeTargetTokenCall,
+        removeNodeCall, scopeTargetChannelsCall, scopeTargetTokenCall,
+    },
+    hopr_node_safe_migration::HoprNodeSafeMigration::{
+        deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
     },
     hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
@@ -40,12 +43,12 @@ use tracing::{debug, info};
 
 use crate::{
     constants::{
-        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS,
-        DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
-        SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
+        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
+        ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
+        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
     },
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
-    utils::{HelperErrors, get_create2_address},
+    utils::{HelperErrors, build_default_target, get_create2_address},
 };
 
 sol!(
@@ -694,9 +697,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     );
 
     // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(hopr_channels_address)?;
+
     // salt nonce
     let curr_nonce = provider
         .get_transaction_count(caller)
@@ -972,9 +974,7 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
     let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
 
     // scope channels and tokens contract of the network
-    let default_target =
-        U256::from_str(format!("{channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str()).unwrap();
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(channels_address)?;
 
     multisend_txns.push(MultisendTransaction {
         // build multisend tx payload
@@ -1015,6 +1015,136 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
         .into(),
         tx_operation: SafeTxOperation::Call,
         to: token_address,
+        value: U256::ZERO,
+    });
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Create a new module and include nodes to the new module, and remove the old module from the safe
+/// Calling `migrateSafeV141ToL2AndMigrateToUpgradeableModule` function on HoprNodeSafeMigration via delegatecall
+pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    old_module_address: Address,
+    channels_address: Address,
+    deployment_nonce: U256,
+    node_addresses: Vec<Address>,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    // scope channels and tokens contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    let multisend_txns: Vec<MultisendTransaction> = vec![MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall {
+            oldModuleProxy: old_module_address,
+            defaultTarget: default_target.into(),
+            nonce: deployment_nonce,
+            nodes: node_addresses,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::DelegateCall,
+        to: *safe.address(),
+        value: U256::ZERO,
+    }];
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Create a new module and include nodes to the new module. The old module is not removed from the safe
+/// Calling `deployNewV4Module` function on HoprNodeSafeMigration via delegatecall
+pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    channels_address: Address,
+    deployment_nonce: U256,
+    node_addresses: Vec<Address>,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    // get chain id and safe nonce for further safe txns
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    // scope channels and tokens contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    let multisend_txns: Vec<MultisendTransaction> = vec![MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: deployNewV4ModuleCall {
+            defaultTarget: default_target.into(),
+            nonce: deployment_nonce,
+            nodes: node_addresses,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::DelegateCall,
+        to: *safe.address(),
+        value: U256::ZERO,
+    }];
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Add new network targets to an existing module, such that the existing
+/// module can work with a new network
+/// Calling `scopeTargetChannels` function on the module
+pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    module_address: Address,
+    channels_address: Address,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
+
+    // scope channels contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    // interact with the module to add new target, from a Safe transaction
+    multisend_txns.push(MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: scopeTargetChannelsCall {
+            defaultTarget: default_target,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::Call,
+        to: module_address,
         value: U256::ZERO,
     });
 
@@ -1271,6 +1401,7 @@ mod tests {
         let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
             .await
             .expect("failed to deploy");
+        println!("deployed hopr contracts {:?}", instances);
 
         // deploy multicall contract
         ContractInstances::deploy_multicall3(client.clone()).await?;
@@ -1499,8 +1630,8 @@ mod tests {
         let caller = client.default_signer_address();
 
         // build the default permissions of capabilities
-        let default_target = format!("{:?}{}", instances.channels.address(), DEFAULT_CAPABILITY_PERMISSIONS);
-        debug!("default target {:?}", default_target);
+        let default_target = build_default_target(*instances.channels.address())?;
+
         // salt nonce
         let curr_nonce = client.get_transaction_count(caller).pending().await?;
         let nonce = keccak256((caller, U256::from(curr_nonce)).abi_encode_packed());
@@ -1696,6 +1827,8 @@ mod tests {
         let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
             .await
             .expect("failed to deploy");
+
+        println!("deployed hopr contracts {:?}", instances);
         // deploy multicall contract
         ContractInstances::deploy_multicall3(client.clone()).await?;
         // deploy safe suits
