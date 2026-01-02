@@ -1668,7 +1668,7 @@ mod tests {
                 caller,
                 nonce.into(),
                 safe_address,
-                U256::from_str(default_target.as_str())?.into(),
+                default_target.into(),
             )
             .call()
             .await?;
@@ -1683,7 +1683,7 @@ mod tests {
             .clone(
                 //*instances.module_implementation.address(),
                 nonce.into(),
-                U256::from_str(&default_target)?.into(),
+                default_target.into(),
                 vec![caller],
             )
             .send()
