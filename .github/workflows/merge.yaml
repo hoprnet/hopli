@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build-docker:
-    name: Build docker ${{ matrix.architecture }}
+    name: Docker ${{ matrix.architecture }}
     if: github.event.pull_request.merged == true
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@ausias/fix-actions
     strategy:
@@ -45,7 +45,7 @@ jobs:
       docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
       docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
   build-binaries:
-    name: Build binary ${{ matrix.architecture }}
+    name: Binary ${{ matrix.architecture }}
     if: github.event.pull_request.merged == true
     strategy:
       fail-fast: false
