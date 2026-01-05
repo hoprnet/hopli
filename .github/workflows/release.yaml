@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build-docker:
     name: Docker ${{ matrix.architecture }}
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@ausias/fix-actions
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@build-docker-image-v1
     strategy:
       matrix:
         include:
@@ -40,7 +40,7 @@ jobs:
   build-docker-manifest:
     name: Docker manifest
     needs: build-docker
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@ausias/fix-actions
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
     with:
       version_type: "release"
       docker_image_name: "hopli"
@@ -59,7 +59,7 @@ jobs:
           - architecture: x86_64-linux
             runner: self-hosted-hoprnet-bigger
             build_command: nix build -L .#hopli-x86_64-linux
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@ausias/fix-actions
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
     with:
       source_branch: ${{ github.ref }}
       version_type: "release"

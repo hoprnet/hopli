@@ -26,9 +26,9 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_branch }}
       - name: Setup Nix
-        uses: hoprnet/hopr-workflows/actions/setup-nix@ausias/fix-actions
+        uses: hoprnet/hopr-workflows/actions/setup-nix@setup-nix-v1
         with:
-          cache: hopli
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          cachix_cache_name: hopli
+          cachix_auth_token: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - name: Run Audit
         run: nix run .#audit
