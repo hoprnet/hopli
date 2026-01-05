@@ -24,6 +24,8 @@ jobs:
           - architecture: x86_64-linux
             command: nix run -L .#hopli-docker-build-and-upload
             debug_command: nix run -L .#hopli-dev-docker-build-and-upload
+    permissions:
+        contents: read
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: "commit"
@@ -42,6 +44,8 @@ jobs:
     name: Docker manifest
     needs: build-docker
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
+    permissions:
+        contents: read
     with:
       version_type: "commit"
       docker_image_name: "hopli"
@@ -61,6 +65,8 @@ jobs:
             runner: self-hosted-hoprnet-bigger
             build_command: nix build -L .#hopli-x86_64-linux
     uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
+    permissions:
+        contents: read
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: "commit"
