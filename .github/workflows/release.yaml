@@ -15,6 +15,8 @@ on:
 concurrency:
   group: release
   cancel-in-progress: false
+permissions:
+  contents: write
 jobs:
   build-docker:
     name: Docker ${{ matrix.architecture }}
@@ -25,7 +27,7 @@ jobs:
           - architecture: x86_64-linux
             command: nix run -L .#hopli-docker-build-and-upload
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.ref }}
       version_type: "release"
@@ -44,7 +46,7 @@ jobs:
     needs: build-docker
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
     permissions:
-        contents: read
+      contents: read
     with:
       version_type: "release"
       docker_image_name: "hopli"
@@ -65,7 +67,7 @@ jobs:
             build_command: nix build -L .#hopli-x86_64-linux
     uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.ref }}
       version_type: "release"
@@ -85,6 +87,8 @@ jobs:
       - build-docker-manifest
       - build-binaries
     runs-on: self-hosted-hoprnet-small
+    permissions:
+      contents: write
     steps:
       - name: Checkout hoprnet repository
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -92,7 +96,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.ref }}
       - name: Release version
-        uses: hoprnet/hopr-workflows/actions/release-version@release-version-v1
+        uses: hoprnet/hopr-workflows/actions/release-version@15db9fb5571957317b77567abef997b1554f2fbb  # release-version-v1
         with:
           file: Cargo.toml
           release_type: "${{ inputs.release_type }}"

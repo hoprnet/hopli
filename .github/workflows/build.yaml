@@ -12,6 +12,8 @@ on:
 concurrency:
   group: ${{ github.ref }}-build
   cancel-in-progress: true
+permissions:
+  contents: read
 env:
   CARGO_TERM_COLOR: always
 jobs:
@@ -25,7 +27,7 @@ jobs:
             command: nix run -L .#hopli-docker-build-and-upload
             debug_command: nix run -L .#hopli-dev-docker-build-and-upload
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: "commit"
@@ -45,7 +47,7 @@ jobs:
     needs: build-docker
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
     permissions:
-        contents: read
+      contents: read
     with:
       version_type: "commit"
       docker_image_name: "hopli"
@@ -66,7 +68,7 @@ jobs:
             build_command: nix build -L .#hopli-x86_64-linux
     uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: "commit"

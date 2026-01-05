@@ -7,6 +7,8 @@ on:
 concurrency:
   group: merge
   cancel-in-progress: false
+permissions:
+  contents: read
 jobs:
   build-docker:
     name: Docker ${{ matrix.architecture }}
@@ -18,7 +20,7 @@ jobs:
           - architecture: x86_64-linux
             command: nix run -L .#hopli-docker-build-and-upload
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.event.pull_request.base.ref }}
       version_type: "pr"
@@ -38,7 +40,7 @@ jobs:
     needs: build-docker
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
     permissions:
-        contents: read
+      contents: read
     with:
       version_type: "pr"
       docker_image_name: "hopli"
@@ -60,7 +62,7 @@ jobs:
             build_command: nix build -L .#hopli-x86_64-linux
     uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
     permissions:
-        contents: read
+      contents: read
     with:
       source_branch: ${{ github.event.pull_request.base.ref }}
       version_type: "pr"
