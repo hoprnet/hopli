@@ -1,18 +1,25 @@
-name: Merge PR
+name: Close release
 on:
-  pull_request:
-    types:
-      - closed
-      # - synchronize
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Next version type"
+        required: true
+        type: choice
+        default: "patch"
+        options:
+          - rc
+          - patch
+          - minor
+          - major
 concurrency:
-  group: merge
+  group: release
   cancel-in-progress: false
 permissions:
-  contents: read
+  contents: write
 jobs:
   build-docker:
     name: Docker ${{ matrix.architecture }}
-    if: github.event.pull_request.merged == true
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@build-docker-image-v1
     strategy:
       matrix:
@@ -22,8 +29,8 @@ jobs:
     permissions:
       contents: read
     with:
-      source_branch: ${{ github.event.pull_request.base.ref }}
-      version_type: "pr"
+      source_branch: ${{ github.ref }}
+      version_type: "release"
       architecture: ${{ matrix.architecture }}
       cachix_cache_name: "hopli"
       build_file: "Cargo.toml"
@@ -35,14 +42,13 @@ jobs:
       docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
       docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
   build-docker-manifest:
-    if: github.event.pull_request.merged == true
     name: Docker manifest
     needs: build-docker
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
     permissions:
       contents: read
     with:
-      version_type: "pr"
+      version_type: "release"
       docker_image_name: "hopli"
       docker_build_version: ${{ needs.build-docker.outputs.docker_build_version }}
       docker_debug_version: ${{ needs.build-docker.outputs.docker_debug_version }}
@@ -52,7 +58,6 @@ jobs:
       docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
   build-binaries:
     name: Binary ${{ matrix.architecture }}
-    if: github.event.pull_request.merged == true
     strategy:
       fail-fast: false
       matrix:
@@ -64,8 +69,8 @@ jobs:
     permissions:
       contents: read
     with:
-      source_branch: ${{ github.event.pull_request.base.ref }}
-      version_type: "pr"
+      source_branch: ${{ github.ref }}
+      version_type: "release"
       architecture: ${{ matrix.architecture }}
       cachix_cache_name: "hopli"
       build_file: "Cargo.toml"
@@ -76,3 +81,27 @@ jobs:
       gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
+  release:
+    name: Close release
+    needs:
+      - build-docker-manifest
+      - build-binaries
+    runs-on: self-hosted-hoprnet-small
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout hoprnet repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - name: Release version
+        uses: hoprnet/hopr-workflows/actions/release-version@18bf0070b97ef2e46488c946d2706a08272d1dd6 # release-version-v1
+        with:
+          file: Cargo.toml
+          release_type: "${{ inputs.release_type }}"
+          zulip_api_key: ${{ secrets.ZULIP_API_KEY }}
+          zulip_email: ${{ secrets.ZULIP_EMAIL }}
+          zulip_channel: "Hoprd"
+          zulip_topic: "Releases"
+          gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
