@@ -994,3 +994,11 @@ pub fn create_anvil_at_port(default: bool) -> AnvilInstance {
     }
     anvil.spawn()
 }
+
+pub fn build_default_target(channels_address: Address) -> Result<primitives::U256, HelperErrors> {
+    // scope channels and tokens contract of the network
+    let default_target = U256::from_str(format!("{channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
+        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
+    debug!("default target {:?}", default_target);
+    Ok(default_target)
+}
