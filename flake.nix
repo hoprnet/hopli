@@ -4,7 +4,8 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nixpkgs.url = "github:NixOS/nixpkgs/release-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay/master";
     crane.url = "github:ipetkov/crane/v0.21.0";
     nix-lib.url = "github:hoprnet/nix-lib";
@@ -23,8 +24,8 @@
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, flake-parts, rust-overlay, crane
-    , nix-lib, foundry, pre-commit, ... }@inputs:
+  outputs = { self, nixpkgs, nixpkgs-unstable, flake-utils, flake-parts
+    , rust-overlay, crane, nix-lib, foundry, pre-commit, ... }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports =
         [ inputs.treefmt-nix.flakeModule inputs.flake-root.flakeModule ];
@@ -35,6 +36,8 @@
           localSystem = system;
           overlays = [ (import rust-overlay) foundry.overlay ];
           pkgs = import nixpkgs { inherit localSystem overlays; };
+          pkgsUnstable =
+            import nixpkgs-unstable { inherit localSystem overlays; };
           buildPlatform = pkgs.stdenv.buildPlatform;
 
           # Import nix-lib for shared Nix utilities
@@ -319,7 +322,7 @@
           run-audit = flake-utils.lib.mkApp {
             drv = pkgs.writeShellApplication {
               name = "audit";
-              runtimeInputs = [ pkgs.cargo pkgs.cargo-audit ];
+              runtimeInputs = [ pkgsUnstable.cargo-audit ];
               text = ''
                 cargo audit
               '';
