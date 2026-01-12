@@ -27,5 +27,3 @@ result
 
 # Environment variables file
 .env/
-
-.direnv/
