@@ -4,7 +4,8 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nixpkgs.url = "github:NixOS/nixpkgs/release-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay/master";
     crane.url = "github:ipetkov/crane/v0.21.0";
     nix-lib.url = "github:hoprnet/nix-lib";
@@ -23,25 +24,48 @@
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, flake-parts, rust-overlay, crane
-    , nix-lib, foundry, pre-commit, ... }@inputs:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nixpkgs-unstable,
+      flake-utils,
+      flake-parts,
+      rust-overlay,
+      crane,
+      nix-lib,
+      foundry,
+      pre-commit,
+      ...
+    }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      imports =
-        [ inputs.treefmt-nix.flakeModule inputs.flake-root.flakeModule ];
-      perSystem = { config, lib, system, ... }:
+      imports = [
+        inputs.treefmt-nix.flakeModule
+        inputs.flake-root.flakeModule
+      ];
+      perSystem =
+        {
+          config,
+          lib,
+          system,
+          ...
+        }:
         let
           rev = toString (self.shortRev or self.dirtyShortRev);
           fs = lib.fileset;
           localSystem = system;
-          overlays = [ (import rust-overlay) foundry.overlay ];
+          overlays = [
+            (import rust-overlay)
+            foundry.overlay
+          ];
           pkgs = import nixpkgs { inherit localSystem overlays; };
+          pkgsUnstable = import nixpkgs-unstable { inherit localSystem overlays; };
           buildPlatform = pkgs.stdenv.buildPlatform;
 
           # Import nix-lib for shared Nix utilities
           nixLib = nix-lib.lib.${system};
 
-          craneLib = (crane.mkLib pkgs).overrideToolchain
-            (p: p.rust-bin.stable.latest.default);
+          craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default);
 
           # Use nix-lib to create all rust builders for cross-compilation
           builders = nixLib.mkRustBuilders {
@@ -87,33 +111,26 @@
             cargoToml = ./Cargo.toml;
           };
 
-          hopli =
-            rust-builder-local.callPackage nixLib.mkRustPackage hopliBuildArgs;
+          hopli = rust-builder-local.callPackage nixLib.mkRustPackage hopliBuildArgs;
 
           # also used for Docker image
-          hopli-x86_64-linux =
-            rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage
-            hopliBuildArgs;
+          hopli-x86_64-linux = rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage hopliBuildArgs;
           # also used for Docker image
-          hopli-x86_64-linux-dev =
-            rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage
-            (hopliBuildArgs // { CARGO_PROFILE = "dev"; });
-          hopli-aarch64-linux =
-            rust-builder-aarch64-linux.callPackage nixLib.mkRustPackage
-            hopliBuildArgs;
+          hopli-x86_64-linux-dev = rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage (
+            hopliBuildArgs // { CARGO_PROFILE = "dev"; }
+          );
+          hopli-aarch64-linux = rust-builder-aarch64-linux.callPackage nixLib.mkRustPackage hopliBuildArgs;
           # CAVEAT: must be built from a darwin system
-          hopli-x86_64-darwin =
-            rust-builder-x86_64-darwin.callPackage nixLib.mkRustPackage
-            hopliBuildArgs;
+          hopli-x86_64-darwin = rust-builder-x86_64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
           # CAVEAT: must be built from a darwin system
-          hopli-aarch64-darwin =
-            rust-builder-aarch64-darwin.callPackage nixLib.mkRustPackage
-            hopliBuildArgs;
-          hopli-clippy = rust-builder-local.callPackage nixLib.mkRustPackage
-            (hopliBuildArgs // { runClippy = true; });
+          hopli-aarch64-darwin = rust-builder-aarch64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
+          hopli-clippy = rust-builder-local.callPackage nixLib.mkRustPackage (
+            hopliBuildArgs // { runClippy = true; }
+          );
 
-          hopli-dev = rust-builder-local.callPackage nixLib.mkRustPackage
-            (hopliBuildArgs // { CARGO_PROFILE = "dev"; });
+          hopli-dev = rust-builder-local.callPackage nixLib.mkRustPackage (
+            hopliBuildArgs // { CARGO_PROFILE = "dev"; }
+          );
           profileDeps = with pkgs; [
             gdb
             # FIXME: heaptrack would be useful, but it adds 700MB to the image size (unpacked)
@@ -136,11 +153,13 @@
           # build candidate binary as static on Linux amd64 to get more test exposure specifically via smoke tests
           hopli-candidate =
             if buildPlatform.isLinux && buildPlatform.isx86_64 then
-              rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage
-              (hopliBuildArgs // { CARGO_PROFILE = "candidate"; })
+              rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage (
+                hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
+              )
             else
-              rust-builder-local.callPackage nixLib.mkRustPackage
-              (hopliBuildArgs // { CARGO_PROFILE = "candidate"; });
+              rust-builder-local.callPackage nixLib.mkRustPackage (
+                hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
+              );
 
           # Man pages using nix-lib
           hopli-man = nixLib.mkManPage {
@@ -193,7 +212,8 @@
           #   ];
           # };
 
-          dockerImageUploadScript = image:
+          dockerImageUploadScript =
+            image:
             pkgs.writeShellScriptBin "docker-image-upload" ''
               set -eu
               OCI_ARCHIVE="$(nix build --no-link --print-out-paths ${image})"
@@ -211,8 +231,9 @@
           hopli-profile-docker-build-and-upload = flake-utils.lib.mkApp {
             drv = dockerImageUploadScript hopli-profile-docker;
           };
-          docs = rust-builder-local-nightly.callPackage nixLib.mkRustPackage
-            (hopliBuildArgs // { buildDocs = true; });
+          docs = rust-builder-local-nightly.callPackage nixLib.mkRustPackage (
+            hopliBuildArgs // { buildDocs = true; }
+          );
           pre-commit-check = pre-commit.lib.${system}.run {
             src = ./.;
             hooks = {
@@ -287,8 +308,7 @@
             shellHook = ''
               ${pre-commit-check.shellHook}
             '';
-            rustToolchain = pkgs.rust-bin.selectLatestNightlyWith
-              (toolchain: toolchain.default);
+            rustToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
           };
 
           nightlyShell = nixLib.mkDevShell {
@@ -300,8 +320,7 @@
             shellHook = ''
               ${pre-commit-check.shellHook}
             '';
-            rustToolchain = pkgs.rust-bin.selectLatestNightlyWith
-              (toolchain: toolchain.default);
+            rustToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
           };
           run-check = flake-utils.lib.mkApp {
             drv = pkgs.writeShellScriptBin "run-check" ''
@@ -319,7 +338,10 @@
           run-audit = flake-utils.lib.mkApp {
             drv = pkgs.writeShellApplication {
               name = "audit";
-              runtimeInputs = [ pkgs.cargo pkgs.cargo-audit ];
+              runtimeInputs = with pkgsUnstable; [
+                cargo
+                cargo-audit
+              ];
               text = ''
                 cargo audit
               '';
@@ -341,7 +363,8 @@
               mv labeler.yml.new .github/labeler.yml
             '';
           };
-        in {
+        in
+        {
           treefmt = {
             inherit (config.flake-root) projectRootFile;
 
@@ -369,8 +392,10 @@
             settings.formatter.shfmt.includes = [ "*.sh" ];
 
             programs.yamlfmt.enable = true;
-            settings.formatter.yamlfmt.includes =
-              [ ".github/labeler.yml" ".github/workflows/*.yaml" ];
+            settings.formatter.yamlfmt.includes = [
+              ".github/labeler.yml"
+              ".github/workflows/*.yaml"
+            ];
             # trying setting from https://github.com/google/yamlfmt/blob/main/docs/config-file.md
             settings.formatter.yamlfmt.settings = {
               formatter.type = "basic";
@@ -381,8 +406,14 @@
             };
 
             programs.prettier.enable = true;
-            settings.formatter.prettier.includes = [ "*.md" "*.json" ];
-            settings.formatter.prettier.excludes = [ "*.yml" "*.yaml" ];
+            settings.formatter.prettier.includes = [
+              "*.md"
+              "*.json"
+            ];
+            settings.formatter.prettier.excludes = [
+              "*.yml"
+              "*.yaml"
+            ];
             programs.rustfmt.enable = true;
             # using the official Nixpkgs formatting
             # see https://github.com/NixOS/rfcs/blob/master/rfcs/0166-nix-formatting.md
@@ -391,10 +422,7 @@
             programs.ruff-format.enable = true;
 
             settings.formatter.rustfmt = {
-              command = "${
-                  pkgs.rust-bin.selectLatestNightlyWith
-                  (toolchain: toolchain.default)
-                }/bin/rustfmt";
+              command = "${pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default)}/bin/rustfmt";
             };
           };
 
@@ -410,8 +438,13 @@
           };
 
           packages = {
-            inherit hopli hopli-dev hopli-docker hopli-dev-docker
-              hopli-profile-docker;
+            inherit
+              hopli
+              hopli-dev
+              hopli-docker
+              hopli-dev-docker
+              hopli-profile-docker
+              ;
             inherit hopli-candidate;
             inherit docs;
             inherit pre-commit-check;
@@ -434,7 +467,11 @@
           formatter = config.treefmt.build.wrapper;
         };
       # platforms which are supported as build environments
-      systems =
-        [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ];
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
+      ];
     };
 }
