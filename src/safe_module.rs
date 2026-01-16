@@ -62,7 +62,6 @@
 //!     --password-path "./test/pwd" \
 //!     --safe-address 0x6a64fe01c3aba5bdcd04b81fef375369ca47326f \
 //!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
-//!     --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
@@ -277,11 +276,6 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
-
-        /// Access to the private key, of which the wallet has `MANAGER_ROLE` of network registry
-        /// If provided, this wallet will grant the created safe access to the network registry
-        #[command(flatten, name = "manager_private_key")]
-        manager_private_key: ManagerPrivateKeyArgs,
     },
 
     /// Move nodes to one single safe and module pair
