@@ -29,7 +29,7 @@ use hopr_bindings::{
     },
     hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
-        removeNodeCall, scopeTargetChannelsCall, scopeTargetTokenCall,
+        removeNodeCall, scopeTargetTokenCall,
     },
     hopr_node_safe_migration::HoprNodeSafeMigration::{
         deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
@@ -1222,7 +1222,7 @@ pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
     // interact with the module to add new target, from a Safe transaction
     multisend_txns.push(MultisendTransaction {
         // build multisend tx payload
-        encoded_data: scopeTargetChannelsCall {
+        encoded_data: addChannelsAndTokenTargetCall {
             defaultTarget: default_target,
         }
         .abi_encode()
