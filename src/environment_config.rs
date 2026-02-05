@@ -126,7 +126,7 @@ impl NetworkProviderArgs {
             .filler(ChainIdFiller::default())
             .filler(NonceFiller::new(CachedNonceManager::default()))
             .filler(GasFiller)
-            .filler(BlobGasFiller)
+            .filler(BlobGasFiller::default())
             .wallet(wallet)
             .connect_client(rpc_client);
 
@@ -153,7 +153,7 @@ impl NetworkProviderArgs {
             .filler(ChainIdFiller::default())
             .filler(NonceFiller::new(CachedNonceManager::default()))
             .filler(GasFiller)
-            .filler(BlobGasFiller)
+            .filler(BlobGasFiller::default())
             .connect_client(rpc_client);
 
         Ok(Arc::new(provider))

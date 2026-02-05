@@ -4,7 +4,8 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nixpkgs.url = "github:NixOS/nixpkgs/release-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay/master";
     crane.url = "github:ipetkov/crane/v0.21.0";
     nix-lib.url = "github:hoprnet/nix-lib";
@@ -27,6 +28,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-unstable,
       flake-utils,
       flake-parts,
       rust-overlay,
@@ -57,6 +59,7 @@
             foundry.overlay
           ];
           pkgs = import nixpkgs { inherit localSystem overlays; };
+          pkgsUnstable = import nixpkgs-unstable { inherit localSystem overlays; };
           buildPlatform = pkgs.stdenv.buildPlatform;
 
           # Import nix-lib for shared Nix utilities
@@ -99,9 +102,7 @@
           testSrc = nixLib.mkTestSrc {
             root = ./.;
             inherit fs;
-            extraFiles = [
-              (fs.fileFilter (file: file.hasExt "snap") ./.)
-            ];
+            extraFiles = [ (fs.fileFilter (file: file.hasExt "snap") ./.) ];
           };
 
           hopliBuildArgs = {
@@ -123,7 +124,6 @@
           hopli-x86_64-darwin = rust-builder-x86_64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
           # CAVEAT: must be built from a darwin system
           hopli-aarch64-darwin = rust-builder-aarch64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
-
           hopli-clippy = rust-builder-local.callPackage nixLib.mkRustPackage (
             hopliBuildArgs // { runClippy = true; }
           );
@@ -176,25 +176,19 @@
             name = "hopli";
             extraContents = [ hopli-x86_64-linux ];
             Entrypoint = [ "/bin/hopli" ];
-            env = [
-              "ETHERSCAN_API_KEY=placeholder"
-            ];
+            env = [ "ETHERSCAN_API_KEY=placeholder" ];
           };
           hopli-dev-docker = nixLib.mkDockerImage {
             name = "hopli";
             extraContents = [ hopli-x86_64-linux-dev ];
             Entrypoint = [ "/bin/hopli" ];
-            env = [
-              "ETHERSCAN_API_KEY=placeholder"
-            ];
+            env = [ "ETHERSCAN_API_KEY=placeholder" ];
           };
           hopli-profile-docker = nixLib.mkDockerImage {
             name = "hopli";
             extraContents = [ hopli-x86_64-linux ] ++ profileDeps;
             Entrypoint = [ "/bin/hopli" ];
-            env = [
-              "ETHERSCAN_API_KEY=placeholder"
-            ];
+            env = [ "ETHERSCAN_API_KEY=placeholder" ];
           };
 
           # Docker security scanning and SBOM generation using nix-lib
@@ -262,9 +256,7 @@
               };
             };
             tools = pkgs;
-            excludes = [
-              ".gcloudignore"
-            ];
+            excludes = [ ".gcloudignore" ];
           };
 
           # Development shells using nix-lib
@@ -324,9 +316,7 @@
             shellName = "Hopli Nightly";
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
-            extraPackages = with pkgs; [
-              foundry-bin
-            ];
+            extraPackages = with pkgs; [ foundry-bin ];
             shellHook = ''
               ${pre-commit-check.shellHook}
             '';
@@ -348,9 +338,9 @@
           run-audit = flake-utils.lib.mkApp {
             drv = pkgs.writeShellApplication {
               name = "audit";
-              runtimeInputs = [
-                pkgs.cargo
-                pkgs.cargo-audit
+              runtimeInputs = with pkgsUnstable; [
+                cargo
+                cargo-audit
               ];
               text = ''
                 cargo audit
@@ -399,9 +389,7 @@
             ];
 
             programs.shfmt.enable = true;
-            settings.formatter.shfmt.includes = [
-              "*.sh"
-            ];
+            settings.formatter.shfmt.includes = [ "*.sh" ];
 
             programs.yamlfmt.enable = true;
             settings.formatter.yamlfmt.includes = [
@@ -438,9 +426,7 @@
             };
           };
 
-          checks = {
-            inherit hopli-clippy;
-          };
+          checks = { inherit hopli-clippy; };
 
           apps = {
             inherit hopli-docker-build-and-upload;
