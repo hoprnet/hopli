@@ -201,10 +201,10 @@ fn get_safe_transaction_hash(
         .abi_encode();
     debug!("encoded {:?}", hex::encode(&encoded));
     debug!("nonce {:?}", &nonce);
-    
+
     let safe_hash = keccak256(encoded);
     debug!("safe_hash {:?}", hex::encode(&safe_hash));
-    
+
     let encoded_transaction_data = (hex!("1901"), domain_separator, safe_hash).abi_encode_packed();
     debug!("encoded_transaction_data {:?}", hex::encode(&encoded_transaction_data));
 

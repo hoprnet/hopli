@@ -98,3 +98,6 @@ opt-level = 3
 debug = 2
 split-debuginfo = "off"
 strip = false
+
+[package.metadata.cargo-machete]
+ignored = ["alloy-transport-http"]
