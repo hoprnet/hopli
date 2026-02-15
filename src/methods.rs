@@ -1165,7 +1165,7 @@ pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
 
 /// Add new network targets to an existing module, such that the existing
 /// module can work with a new network
-/// Calling `scopeTargetChannels` function on the module
+/// Calling `addChannelsAndTokenTarget` function on the module
 pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     module_address: Address,
