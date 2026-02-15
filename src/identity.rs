@@ -1,5 +1,5 @@
-//! This module contains subcommands for `hopli identity`,
-//! This command contains subcommands to read, create or update identity files, providing correct
+//! This module contains subcommands for `hopli identity`.
+//! This command supports creating, reading, and updating identity files with
 //! [crate::key_pair::PasswordArgs]
 //!
 //! For all three actions around identity files, at least two arguments are needed:
@@ -56,7 +56,7 @@ use crate::{
 /// CLI arguments for `hopli identity`
 #[derive(Clone, Debug, Parser)]
 pub enum IdentitySubcommands {
-    /// Create safe and module proxy if nothing exists
+    /// Create one or more new identity files
     #[command(visible_alias = "cr")]
     Create {
         /// Arguments to locate identity file(s) of HOPR node(s)
@@ -74,7 +74,7 @@ pub enum IdentitySubcommands {
         number: u32,
     },
 
-    /// Migrate safe and module to a new network
+    /// Read identity addresses and peer IDs from identity files
     #[command(visible_alias = "rd")]
     Read {
         /// Arguments to locate identity file(s) of HOPR node(s)
@@ -130,7 +130,7 @@ impl IdentitySubcommands {
                 let id_dir = local_id
                     .identity_directory
                     .ok_or(HelperErrors::MissingIdentityDirectory)?;
-                for index in 0..=number - 1 {
+                for index in 0..number {
                     // build file name
                     let file_prefix = local_id
                         .identity_prefix
@@ -146,7 +146,7 @@ impl IdentitySubcommands {
                 Ok(())
             }
             None => Err(HelperErrors::MissingParameter(
-                "Missing identity_from_directory when creating identites".into(),
+                "Missing identity_from_directory when creating identities".into(),
             )),
         }
     }
@@ -222,17 +222,17 @@ impl Cmd for IdentitySubcommands {
                 new_password,
             } => IdentitySubcommands::execute_identity_update(local_identity, new_password),
             IdentitySubcommands::ConvertPeer { peer_or_key } => {
-                if peer_or_key.peer_or_key.to_lowercase().starts_with("0x") {
-                    let pk = OffchainPublicKey::from_hex(&peer_or_key.peer_or_key)
-                        .map_err(|_| UnableToParseAddress(peer_or_key.peer_or_key))?;
+                let peer_or_key = peer_or_key.peer_or_key;
+                if peer_or_key.to_lowercase().starts_with("0x") {
+                    let pk =
+                        OffchainPublicKey::from_hex(&peer_or_key).map_err(|_| UnableToParseAddress(peer_or_key))?;
                     println!("{}", pk.to_peerid_str());
                     Ok(())
                 } else {
-                    let pk = PeerId::from_str(&peer_or_key.peer_or_key)
-                        .map_err(|_| UnableToParseAddress(peer_or_key.peer_or_key.clone()))
+                    let pk = PeerId::from_str(&peer_or_key)
+                        .map_err(|_| UnableToParseAddress(peer_or_key.clone()))
                         .and_then(|p| {
-                            OffchainPublicKey::from_peerid(&p)
-                                .map_err(|_| UnableToParseAddress(peer_or_key.peer_or_key))
+                            OffchainPublicKey::from_peerid(&p).map_err(|_| UnableToParseAddress(peer_or_key))
                         })?;
                     println!("{}", pk.to_hex());
                     Ok(())

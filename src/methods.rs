@@ -1,5 +1,5 @@
-//! This module contains all the methods used for onchain interaction, especially with Safe instance, Mutlicall, and
-//! Multisend contracts.
+//! This module contains helpers for on-chain interactions, especially around
+//! Safe, Multicall, and Multisend contracts.
 //!
 //! [SafeTxOperation] corresponds to the `Operation` Enum used in Safe smart contract.
 //!
@@ -119,7 +119,7 @@ impl From<SafeTxOperation> for u8 {
 /// Struct to make a multisend transaction, mainly used by safe instances
 #[derive(Debug, Clone)]
 pub struct MultisendTransaction {
-    // data paylaod encoded with selector
+    // data payload encoded with selector
     pub encoded_data: Bytes,
     // transaction type
     pub tx_operation: SafeTxOperation,
@@ -146,10 +146,10 @@ impl MultisendTransaction {
     }
 
     /// build a multisend transaction data payload
-    fn build_multisend_tx(transactions: Vec<MultisendTransaction>) -> Vec<u8> {
-        let mut payload: Vec<u8> = Vec::new();
+    fn build_multisend_tx(transactions: &[MultisendTransaction]) -> Vec<u8> {
+        let mut payload = Vec::new();
         for transaction in transactions {
-            payload = [payload, transaction.encode_packed()].concat();
+            payload.extend(transaction.encode_packed());
         }
         debug!("payload {:?}", hex::encode(&payload));
         payload
@@ -217,7 +217,7 @@ fn get_safe_transaction_hash(
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
 /// Note that the refund address is the caller (safe owner) wallet
-pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     signer_key: ChainKeypair,
     multisend_contract: Address,
@@ -232,12 +232,9 @@ pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provid
 
     // prepare a safe transaction:
     // 1. calculate total value
-    let total_value = multisend_txns
-        .clone()
-        .into_iter()
-        .fold(U256::ZERO, |acc, cur| acc.add(cur.value));
+    let total_value = multisend_txns.iter().fold(U256::ZERO, |acc, cur| acc.add(cur.value));
     // 2. prepare tx payload
-    let tx_payload = MultisendTransaction::build_multisend_tx(multisend_txns);
+    let tx_payload = MultisendTransaction::build_multisend_tx(&multisend_txns);
     let multisend_payload = multiSendCall {
         transactions: tx_payload.into(),
     }
@@ -295,6 +292,29 @@ pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provid
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
 /// Note that the refund address is the caller (safe owner) wallet
+pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    signer_key: ChainKeypair,
+    multisend_contract: Address,
+    multisend_txns: Vec<MultisendTransaction>,
+    chain_id: U256,
+    nonce: U256,
+) -> Result<(), HelperErrors> {
+    send_multisend_safe_transaction_with_threshold_one_impl(
+        safe,
+        signer_key,
+        multisend_contract,
+        multisend_txns,
+        chain_id,
+        nonce,
+    )
+    .await
+}
+
+/// Use safe to delegatecall to multisend contract
+/// Note that when no additional signature is provided, the safe must have a threshold of one,
+/// so that the transaction can be executed.
+/// Note that the refund address is the caller (safe owner) wallet
 pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     signer_key: ChainKeypair,
@@ -303,70 +323,15 @@ pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvide
     chain_id: U256,
     nonce: U256,
 ) -> Result<(), HelperErrors> {
-    // get signer
-    let signer = safe.provider().default_signer_address();
-    // let signer = safe.client().default_sender().expect("client must have a sender");
-    let wallet = PrivateKeySigner::from_slice(signer_key.secret().as_ref()).expect("failed to construct wallet");
-
-    // prepare a safe transaction:
-    // 1. calculate total value
-    let total_value = multisend_txns
-        .clone()
-        .into_iter()
-        .fold(U256::ZERO, |acc, cur| acc.add(cur.value));
-    // 2. prepare tx payload
-    let tx_payload = MultisendTransaction::build_multisend_tx(multisend_txns);
-    let multisend_payload = multiSendCall {
-        transactions: tx_payload.into(),
-    }
-    .abi_encode();
-    // 3. get domain separator
-    let domain_separator = get_domain_separator(chain_id, *safe.address());
-
-    debug!("multisend_payload {:?}", hex::encode(&multisend_payload));
-
-    // get transaction hash
-    let transaction_hash = get_safe_transaction_hash(
+    send_multisend_safe_transaction_with_threshold_one_impl(
+        safe,
+        signer_key,
         multisend_contract,
-        total_value,
-        multisend_payload.clone(),
-        SafeTxOperation::DelegateCall,
-        signer,
+        multisend_txns,
+        chain_id,
         nonce,
-        domain_separator,
-    );
-
-    // sign the transaction
-    let signature = wallet
-        .sign_hash(&B256::from_slice(&transaction_hash))
-        .await
-        .unwrap_or_else(|_| panic!("failed to sign a transaction hash"));
-    debug!("signature {:?}", hex::encode(signature.as_bytes()));
-
-    // execute the transaction
-    let tx_receipt = safe
-        .execTransaction(
-            multisend_contract,
-            total_value,
-            multisend_payload.into(),
-            SafeTxOperation::DelegateCall.into(),
-            U256::ZERO,
-            U256::ZERO,
-            U256::ZERO,
-            Address::ZERO,
-            signer,
-            Bytes::from(signature.as_bytes()),
-        )
-        .send()
-        .await?
-        // .unwrap_or_else(|_| panic!("failed to exeute a pending transaction"))
-        .get_receipt()
-        .await?;
-
-    tx_receipt
-        .decoded_log::<SafeSingleton::ExecutionSuccess>()
-        .ok_or(HelperErrors::MultiSendError)?;
-    Ok(())
+    )
+    .await
 }
 
 /// Get chain id and safe nonce
@@ -388,34 +353,30 @@ pub async fn get_native_and_token_balances<P: Provider>(
     let provider = hopr_token.provider();
     let multicall3_instance = IMulticall3ExtractInstance::new(MULTICALL3_ADDRESS, provider);
 
-    // if there is less than two addresses, use multicall3 on each address
-    // otherwise, make multicall on all addresses
-    if addresses.is_empty() {
-        Ok((vec![], vec![]))
-    } else if addresses.len() == 1 {
-        let address = addresses[0];
-        let multicall = provider
-            .multicall()
-            .get_eth_balance(address)
-            .add(hopr_token.balanceOf(address));
-
-        let (native_balance, token_balance) = multicall.aggregate().await?;
-        Ok((vec![native_balance], vec![token_balance]))
-    } else {
-        let mut native_balances_multicall = MulticallBuilder::new_dynamic(provider);
-        let mut token_balances_multicall = MulticallBuilder::new_dynamic(provider);
-
-        for address in addresses {
-            native_balances_multicall =
-                native_balances_multicall.add_dynamic(multicall3_instance.getEthBalance(address));
-            token_balances_multicall = token_balances_multicall.add_dynamic(hopr_token.balanceOf(address));
-            // balances_multicall.add_call(hopr_token.balanceOf(address));
+    match addresses.as_slice() {
+        [] => Ok((vec![], vec![])),
+        [address] => {
+            let multicall = provider
+                .multicall()
+                .get_eth_balance(*address)
+                .add(hopr_token.balanceOf(*address));
+            let (native_balance, token_balance) = multicall.aggregate().await?;
+            Ok((vec![native_balance], vec![token_balance]))
         }
+        _ => {
+            let mut native_balances_multicall = MulticallBuilder::new_dynamic(provider);
+            let mut token_balances_multicall = MulticallBuilder::new_dynamic(provider);
 
-        let native_balances_return = native_balances_multicall.aggregate().await?;
-        let token_balances_return = token_balances_multicall.aggregate().await?;
+            for address in addresses {
+                native_balances_multicall =
+                    native_balances_multicall.add_dynamic(multicall3_instance.getEthBalance(address));
+                token_balances_multicall = token_balances_multicall.add_dynamic(hopr_token.balanceOf(address));
+            }
 
-        Ok((native_balances_return, token_balances_return))
+            let native_balances_return = native_balances_multicall.aggregate().await?;
+            let token_balances_return = token_balances_multicall.aggregate().await?;
+            Ok((native_balances_return, token_balances_return))
+        }
     }
 }
 
@@ -496,12 +457,12 @@ pub async fn transfer_or_mint_tokens<P: Provider + WalletProvider>(
     }
 
     // when there are multiple recipients, use multicall; when single recipient, direct transfer
-    if addresses.len() == 1 {
+    if let ([address], [amount]) = (addresses.as_slice(), amounts.as_slice()) {
         info!("doing direct transfer...");
 
         // direct transfer
         hopr_token
-            .transfer(addresses[0], amounts[0])
+            .transfer(*address, *amount)
             .send()
             .await?
             // .unwrap_or_else(|_| panic!("failed to exeute a pending transaction"))
@@ -522,11 +483,10 @@ pub async fn transfer_or_mint_tokens<P: Provider + WalletProvider>(
             .await?;
 
         let calls: Vec<Call3> = addresses
-            .clone()
             .into_iter()
-            .enumerate()
-            .map(|(i, addr)| {
-                let calldata = hopr_token.transferFrom(caller, addr, amounts[i]);
+            .zip(amounts.into_iter())
+            .map(|(addr, amount)| {
+                let calldata = hopr_token.transferFrom(caller, addr, amount);
                 let call = Call3 {
                     target: *hopr_token.address(),
                     allowFailure: false,

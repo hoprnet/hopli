@@ -67,13 +67,12 @@ pub fn transfer_native_token_payload(
     );
 
     let calls: Vec<Call3Value> = addresses
-        .clone()
         .into_iter()
-        .enumerate()
-        .map(|(i, addr)| Call3Value {
+        .zip(amounts)
+        .map(|(addr, amount)| Call3Value {
             target: addr,
             allowFailure: false,
-            value: amounts[i],
+            value: amount,
             callData: Bytes::default(),
         })
         .collect::<Vec<_>>();
