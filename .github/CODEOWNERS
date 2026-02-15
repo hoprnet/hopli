@@ -6,8 +6,9 @@
 # Based on Git commit history analysis from the last 6 months.
 # Last updated: 2025-08-06
 
-# Default owners for everything
-* @Teebor-Choka @tolbrino @NumberFour8 @jeandemeusy @QYuQianchen
+# Default owners for everything. Should be as minimal as possible since all must
+# approve. All other entries are OR overrides to this default.
+* @QYuQianchen
 
 # GitHub Actions workflows and CI/CD
 /.github/ @ausias-armesto @tolbrino @Teebor-Choka
