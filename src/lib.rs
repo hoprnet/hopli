@@ -1,3 +1,12 @@
+//! `hopli_lib` contains the core command implementations and utilities used by
+//! the `hopli` CLI.
+//!
+//! Main modules:
+//! - `identity`: create/read/update node identity files
+//! - `faucet`: distribute native/HOPR tokens to nodes
+//! - `safe_module`: create and operate Safe + module setups
+//! - `win_prob`: manage winning probability parameters
+
 pub mod constants;
 pub mod environment_config;
 pub mod faucet;

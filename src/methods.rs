@@ -1,5 +1,5 @@
-//! This module contains all the methods used for onchain interaction, especially with Safe instance, Mutlicall, and
-//! Multisend contracts.
+//! This module contains helpers for on-chain interactions, especially around
+//! Safe, Multicall, and Multisend contracts.
 //!
 //! [SafeTxOperation] corresponds to the `Operation` Enum used in Safe smart contract.
 //!
@@ -31,6 +31,9 @@ use hopr_bindings::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
         removeNodeCall, scopeTargetTokenCall,
     },
+    hopr_node_safe_migration::HoprNodeSafeMigration::{
+        deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
+    },
     hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
     hopr_token::HoprToken::{HoprTokenInstance, approveCall},
@@ -40,12 +43,12 @@ use tracing::{debug, info};
 
 use crate::{
     constants::{
-        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS,
-        DOMAIN_SEPARATOR_TYPEHASH, ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS,
-        SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
+        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
+        ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
+        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
     },
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
-    utils::{HelperErrors, get_create2_address},
+    utils::{HelperErrors, build_default_target, get_create2_address},
 };
 
 sol!(
@@ -116,7 +119,7 @@ impl From<SafeTxOperation> for u8 {
 /// Struct to make a multisend transaction, mainly used by safe instances
 #[derive(Debug, Clone)]
 pub struct MultisendTransaction {
-    // data paylaod encoded with selector
+    // data payload encoded with selector
     pub encoded_data: Bytes,
     // transaction type
     pub tx_operation: SafeTxOperation,
@@ -143,10 +146,10 @@ impl MultisendTransaction {
     }
 
     /// build a multisend transaction data payload
-    fn build_multisend_tx(transactions: Vec<MultisendTransaction>) -> Vec<u8> {
-        let mut payload: Vec<u8> = Vec::new();
+    fn build_multisend_tx(transactions: &[MultisendTransaction]) -> Vec<u8> {
+        let mut payload = Vec::new();
         for transaction in transactions {
-            payload = [payload, transaction.encode_packed()].concat();
+            payload.extend(transaction.encode_packed());
         }
         debug!("payload {:?}", hex::encode(&payload));
         payload
@@ -196,10 +199,14 @@ fn get_safe_transaction_hash(
         nonce,                       // _nonce
     )
         .abi_encode();
+    debug!("encoded {:?}", hex::encode(&encoded));
+    debug!("nonce {:?}", &nonce);
 
     let safe_hash = keccak256(encoded);
+    debug!("safe_hash {:?}", hex::encode(safe_hash));
 
     let encoded_transaction_data = (hex!("1901"), domain_separator, safe_hash).abi_encode_packed();
+    debug!("encoded_transaction_data {:?}", hex::encode(&encoded_transaction_data));
 
     let transaction_hash = keccak256(encoded_transaction_data);
     debug!("transaction_hash {:?}", hex::encode(transaction_hash));
@@ -210,7 +217,7 @@ fn get_safe_transaction_hash(
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
 /// Note that the refund address is the caller (safe owner) wallet
-pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     signer_key: ChainKeypair,
     multisend_contract: Address,
@@ -225,12 +232,9 @@ pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvide
 
     // prepare a safe transaction:
     // 1. calculate total value
-    let total_value = multisend_txns
-        .clone()
-        .into_iter()
-        .fold(U256::ZERO, |acc, cur| acc.add(cur.value));
+    let total_value = multisend_txns.iter().fold(U256::ZERO, |acc, cur| acc.add(cur.value));
     // 2. prepare tx payload
-    let tx_payload = MultisendTransaction::build_multisend_tx(multisend_txns);
+    let tx_payload = MultisendTransaction::build_multisend_tx(&multisend_txns);
     let multisend_payload = multiSendCall {
         transactions: tx_payload.into(),
     }
@@ -284,6 +288,52 @@ pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvide
     Ok(())
 }
 
+/// Use safe to delegatecall to multisend contract
+/// Note that when no additional signature is provided, the safe must have a threshold of one,
+/// so that the transaction can be executed.
+/// Note that the refund address is the caller (safe owner) wallet
+pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    signer_key: ChainKeypair,
+    multisend_contract: Address,
+    multisend_txns: Vec<MultisendTransaction>,
+    chain_id: U256,
+    nonce: U256,
+) -> Result<(), HelperErrors> {
+    send_multisend_safe_transaction_with_threshold_one_impl(
+        safe,
+        signer_key,
+        multisend_contract,
+        multisend_txns,
+        chain_id,
+        nonce,
+    )
+    .await
+}
+
+/// Use safe to delegatecall to multisend contract
+/// Note that when no additional signature is provided, the safe must have a threshold of one,
+/// so that the transaction can be executed.
+/// Note that the refund address is the caller (safe owner) wallet
+pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    signer_key: ChainKeypair,
+    multisend_contract: Address,
+    multisend_txns: Vec<MultisendTransaction>,
+    chain_id: U256,
+    nonce: U256,
+) -> Result<(), HelperErrors> {
+    send_multisend_safe_transaction_with_threshold_one_impl(
+        safe,
+        signer_key,
+        multisend_contract,
+        multisend_txns,
+        chain_id,
+        nonce,
+    )
+    .await
+}
+
 /// Get chain id and safe nonce
 pub async fn get_chain_id_and_safe_nonce<P: Provider>(
     safe: SafeSingletonInstance<P>,
@@ -303,34 +353,30 @@ pub async fn get_native_and_token_balances<P: Provider>(
     let provider = hopr_token.provider();
     let multicall3_instance = IMulticall3ExtractInstance::new(MULTICALL3_ADDRESS, provider);
 
-    // if there is less than two addresses, use multicall3 on each address
-    // otherwise, make multicall on all addresses
-    if addresses.is_empty() {
-        Ok((vec![], vec![]))
-    } else if addresses.len() == 1 {
-        let address = addresses[0];
-        let multicall = provider
-            .multicall()
-            .get_eth_balance(address)
-            .add(hopr_token.balanceOf(address));
-
-        let (native_balance, token_balance) = multicall.aggregate().await?;
-        Ok((vec![native_balance], vec![token_balance]))
-    } else {
-        let mut native_balances_multicall = MulticallBuilder::new_dynamic(provider);
-        let mut token_balances_multicall = MulticallBuilder::new_dynamic(provider);
-
-        for address in addresses {
-            native_balances_multicall =
-                native_balances_multicall.add_dynamic(multicall3_instance.getEthBalance(address));
-            token_balances_multicall = token_balances_multicall.add_dynamic(hopr_token.balanceOf(address));
-            // balances_multicall.add_call(hopr_token.balanceOf(address));
+    match addresses.as_slice() {
+        [] => Ok((vec![], vec![])),
+        [address] => {
+            let multicall = provider
+                .multicall()
+                .get_eth_balance(*address)
+                .add(hopr_token.balanceOf(*address));
+            let (native_balance, token_balance) = multicall.aggregate().await?;
+            Ok((vec![native_balance], vec![token_balance]))
         }
+        _ => {
+            let mut native_balances_multicall = MulticallBuilder::new_dynamic(provider);
+            let mut token_balances_multicall = MulticallBuilder::new_dynamic(provider);
 
-        let native_balances_return = native_balances_multicall.aggregate().await?;
-        let token_balances_return = token_balances_multicall.aggregate().await?;
+            for address in addresses {
+                native_balances_multicall =
+                    native_balances_multicall.add_dynamic(multicall3_instance.getEthBalance(address));
+                token_balances_multicall = token_balances_multicall.add_dynamic(hopr_token.balanceOf(address));
+            }
 
-        Ok((native_balances_return, token_balances_return))
+            let native_balances_return = native_balances_multicall.aggregate().await?;
+            let token_balances_return = token_balances_multicall.aggregate().await?;
+            Ok((native_balances_return, token_balances_return))
+        }
     }
 }
 
@@ -411,12 +457,12 @@ pub async fn transfer_or_mint_tokens<P: Provider + WalletProvider>(
     }
 
     // when there are multiple recipients, use multicall; when single recipient, direct transfer
-    if addresses.len() == 1 {
+    if let ([address], [amount]) = (addresses.as_slice(), amounts.as_slice()) {
         info!("doing direct transfer...");
 
         // direct transfer
         hopr_token
-            .transfer(addresses[0], amounts[0])
+            .transfer(*address, *amount)
             .send()
             .await?
             // .unwrap_or_else(|_| panic!("failed to exeute a pending transaction"))
@@ -437,11 +483,10 @@ pub async fn transfer_or_mint_tokens<P: Provider + WalletProvider>(
             .await?;
 
         let calls: Vec<Call3> = addresses
-            .clone()
             .into_iter()
-            .enumerate()
-            .map(|(i, addr)| {
-                let calldata = hopr_token.transferFrom(caller, addr, amounts[i]);
+            .zip(amounts.into_iter())
+            .map(|(addr, amount)| {
+                let calldata = hopr_token.transferFrom(caller, addr, amount);
                 let call = Call3 {
                     target: *hopr_token.address(),
                     allowFailure: false,
@@ -694,9 +739,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     );
 
     // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(hopr_channels_address)?;
+
     // salt nonce
     let curr_nonce = provider
         .get_transaction_count(caller)
@@ -972,9 +1016,7 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
     let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
 
     // scope channels and tokens contract of the network
-    let default_target =
-        U256::from_str(format!("{channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str()).unwrap();
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(channels_address)?;
 
     multisend_txns.push(MultisendTransaction {
         // build multisend tx payload
@@ -1015,6 +1057,138 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
         .into(),
         tx_operation: SafeTxOperation::Call,
         to: token_address,
+        value: U256::ZERO,
+    });
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Create a new module and include nodes to the new module, and remove the old module from the safe
+/// Calling `migrateSafeV141ToL2AndMigrateToUpgradeableModule` function on HoprNodeSafeMigration via delegatecall
+pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    old_module_address: Address,
+    channels_address: Address,
+    safe_migration_contract_address: Address,
+    deployment_nonce: U256,
+    node_addresses: Vec<Address>,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    // scope channels and tokens contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    let multisend_txns: Vec<MultisendTransaction> = vec![MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall {
+            oldModuleProxy: old_module_address,
+            defaultTarget: default_target.into(),
+            nonce: deployment_nonce,
+            nodes: node_addresses,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::DelegateCall,
+        to: safe_migration_contract_address,
+        value: U256::ZERO,
+    }];
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Create a new module and include nodes to the new module. The old module is not removed from the safe
+/// Calling `deployNewV4Module` function on HoprNodeSafeMigration via delegatecall
+pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    channels_address: Address,
+    safe_migration_contract_address: Address,
+    deployment_nonce: U256,
+    node_addresses: Vec<Address>,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    // get chain id and safe nonce for further safe txns
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    // scope channels and tokens contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    let multisend_txns: Vec<MultisendTransaction> = vec![MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: deployNewV4ModuleCall {
+            defaultTarget: default_target.into(),
+            nonce: deployment_nonce,
+            nodes: node_addresses,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::DelegateCall,
+        to: safe_migration_contract_address,
+        value: U256::ZERO,
+    }];
+
+    // send safe transaction
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key.clone(),
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Add new network targets to an existing module, such that the existing
+/// module can work with a new network
+/// Calling `addChannelsAndTokenTarget` function on the module
+pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    module_address: Address,
+    channels_address: Address,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+    let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
+
+    // scope channels contract of the network
+    let default_target = build_default_target(channels_address)?;
+
+    // interact with the module to add new target, from a Safe transaction
+    multisend_txns.push(MultisendTransaction {
+        // build multisend tx payload
+        encoded_data: addChannelsAndTokenTargetCall {
+            defaultTarget: default_target,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::Call,
+        to: module_address,
         value: U256::ZERO,
     });
 
@@ -1271,6 +1445,7 @@ mod tests {
         let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
             .await
             .expect("failed to deploy");
+        println!("deployed hopr contracts {:?}", instances);
 
         // deploy multicall contract
         ContractInstances::deploy_multicall3(client.clone()).await?;
@@ -1499,8 +1674,8 @@ mod tests {
         let caller = client.default_signer_address();
 
         // build the default permissions of capabilities
-        let default_target = format!("{:?}{}", instances.channels.address(), DEFAULT_CAPABILITY_PERMISSIONS);
-        debug!("default target {:?}", default_target);
+        let default_target = build_default_target(*instances.channels.address())?;
+
         // salt nonce
         let curr_nonce = client.get_transaction_count(caller).pending().await?;
         let nonce = keccak256((caller, U256::from(curr_nonce)).abi_encode_packed());
@@ -1533,12 +1708,7 @@ mod tests {
 
         let module_address_predicted_from_sc = instances
             .stake_factory
-            .predictModuleAddress_1(
-                caller,
-                nonce.into(),
-                safe_address,
-                U256::from_str(default_target.as_str())?.into(),
-            )
+            .predictModuleAddress_1(caller, nonce.into(), safe_address, default_target.into())
             .call()
             .await?;
         info!(
@@ -1552,7 +1722,7 @@ mod tests {
             .clone(
                 //*instances.module_implementation.address(),
                 nonce.into(),
-                U256::from_str(&default_target)?.into(),
+                default_target.into(),
                 vec![caller],
             )
             .send()
@@ -1696,6 +1866,8 @@ mod tests {
         let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
             .await
             .expect("failed to deploy");
+
+        println!("deployed hopr contracts {:?}", instances);
         // deploy multicall contract
         ContractInstances::deploy_multicall3(client.clone()).await?;
         // deploy safe suits
