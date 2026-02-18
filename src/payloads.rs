@@ -22,14 +22,14 @@ use tracing::{debug, info};
 
 use crate::{
     constants::{
-        DEFAULT_CAPABILITY_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER,
-        DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_SAFE_L2_ADDRESS,
-        SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
+        DEFAULT_NODE_PERMISSIONS, DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER, DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER,
+        SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS,
+        SENTINEL_OWNERS,
     },
     methods::{
         SafeSingleton::removeOwnerCall, predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
     },
-    utils::HelperErrors,
+    utils::{HelperErrors, build_default_target},
 };
 
 pub fn transfer_hopr_token_payload(
@@ -67,13 +67,12 @@ pub fn transfer_native_token_payload(
     );
 
     let calls: Vec<Call3Value> = addresses
-        .clone()
         .into_iter()
-        .enumerate()
-        .map(|(i, addr)| Call3Value {
+        .zip(amounts)
+        .map(|(addr, amount)| Call3Value {
             target: addr,
             allowFailure: false,
-            value: amounts[i],
+            value: amount,
             callData: Bytes::default(),
         })
         .collect::<Vec<_>>();
@@ -88,7 +87,6 @@ pub fn transfer_native_token_payload(
 /// Predict safe address deployed by the edge node
 pub fn edge_node_predict_safe_address(
     hopr_node_stake_factory_address: Address,
-    hopr_channels_address: Address,
     nonce: U256,
     admins: Vec<Address>,
 ) -> Result<Address, HelperErrors> {
@@ -107,11 +105,6 @@ pub fn edge_node_predict_safe_address(
         temporary_admins.len()
     );
 
-    // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
-
     let safe_address = predict_safe_address(
         hopr_node_stake_factory_address,
         temporary_admins.clone(),
@@ -129,9 +122,7 @@ pub fn edge_node_predict_module_address(
     nonce: U256,
 ) -> Result<Vec<u8>, HelperErrors> {
     // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(hopr_channels_address)?;
 
     let predict_module_address_payload = predictModuleAddress_1Call {
         caller: MULTICALL3_ADDRESS,
@@ -173,9 +164,7 @@ pub fn edge_node_deploy_safe_module_with_targets_and_nodes_payload(
     );
 
     // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(hopr_channels_address)?;
 
     // Use multicall to deploy a safe proxy instance and a module proxy instance with multicall as an owner
     let mut multicall_payloads: Vec<Call3> = vec![];
@@ -273,9 +262,7 @@ pub fn edge_node_deploy_safe_module_and_maybe_include_node(
     should_include_node: bool,
 ) -> Result<TransactionRequest, HelperErrors> {
     // build the default permissions of capabilities
-    let default_target = U256::from_str(format!("{hopr_channels_address:?}{DEFAULT_CAPABILITY_PERMISSIONS}").as_str())
-        .map_err(|e| HelperErrors::ParseError(format!("Invalid default_target format: {e}")))?;
-    debug!("default target {:?}", default_target);
+    let default_target = build_default_target(hopr_channels_address)?;
 
     let user_data = if should_include_node {
         UserData {

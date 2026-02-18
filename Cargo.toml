@@ -1,6 +1,6 @@
 [package]
 name = "hopli"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -22,6 +22,7 @@ allocator-jemalloc = [
 ] # Use jemalloc as the global allocator on Linux
 
 [dependencies]
+alloy-transport-http = { version = "1", features = ["reqwest-default-tls"] }
 anyhow = "1.0.100"
 clap = { version = "4.5.51", features = ["derive", "env", "string"] }
 hex = "0.4.3"
@@ -97,3 +98,6 @@ opt-level = 3
 debug = 2
 split-debuginfo = "off"
 strip = false
+
+[package.metadata.cargo-machete]
+ignored = ["alloy-transport-http"]
