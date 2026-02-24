@@ -2266,7 +2266,7 @@ dependencies = [
  "env_logger",
  "hex",
  "hex-literal",
- "hopr-bindings 4.7.0 (git+https://github.com/hoprnet/contracts?rev=a0db96f1c614624cf815ec30244b597f35634900)",
+ "hopr-bindings 4.7.0 (git+https://github.com/hoprnet/contracts)",
  "hopr-chain-types",
  "hopr-crypto-keypair",
  "hopr-crypto-random",
@@ -2308,7 +2308,7 @@ dependencies = [
 [[package]]
 name = "hopr-bindings"
 version = "4.7.0"
-source = "git+https://github.com/hoprnet/contracts?rev=a0db96f1c614624cf815ec30244b597f35634900#a0db96f1c614624cf815ec30244b597f35634900"
+source = "git+https://github.com/hoprnet/contracts#a0db96f1c614624cf815ec30244b597f35634900"
 dependencies = [
  "alloy",
  "anyhow",
@@ -2325,7 +2325,7 @@ dependencies = [
 [[package]]
 name = "hopr-chain-types"
 version = "0.14.1"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2345,7 +2345,7 @@ dependencies = [
 [[package]]
 name = "hopr-crypto-keypair"
 version = "0.5.0"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "hex",
  "hopr-crypto-random",
@@ -2364,7 +2364,7 @@ dependencies = [
 [[package]]
 name = "hopr-crypto-random"
 version = "0.4.0"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "generic-array 1.3.5",
  "rand 0.10.0",
@@ -2373,7 +2373,7 @@ dependencies = [
 [[package]]
 name = "hopr-crypto-types"
 version = "0.9.1"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "aes",
  "blake3",
@@ -2403,7 +2403,7 @@ dependencies = [
 [[package]]
 name = "hopr-internal-types"
 version = "0.17.1"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "aquamarine",
  "async-trait",
@@ -2423,7 +2423,7 @@ dependencies = [
 [[package]]
 name = "hopr-parallelize"
 version = "0.2.1"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "futures",
  "lazy_static",
@@ -2436,7 +2436,7 @@ dependencies = [
 [[package]]
 name = "hopr-platform"
 version = "0.3.0"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "thiserror",
 ]
@@ -2444,7 +2444,7 @@ dependencies = [
 [[package]]
 name = "hopr-primitive-types"
 version = "0.10.0"
-source = "git+https://github.com/hoprnet/hoprnet?rev=3f37038bec9d6646bba5eac7280688cb4b853d0b#3f37038bec9d6646bba5eac7280688cb4b853d0b"
+source = "git+https://github.com/hoprnet/hoprnet#3f37038bec9d6646bba5eac7280688cb4b853d0b"
 dependencies = [
  "bigdecimal",
  "chrono",
