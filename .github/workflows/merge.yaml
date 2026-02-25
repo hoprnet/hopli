@@ -46,7 +46,7 @@ jobs:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
   build-docker:
-    name: Docker ${{ matrix.architecture }}
+    name: Docker
     needs: build-binaries
     if: github.event.pull_request.merged == true
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@build-docker-v1
