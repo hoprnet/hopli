@@ -16,22 +16,6 @@
         "type": "github"
       }
     },
-    "crane_2": {
-      "locked": {
-        "lastModified": 1768319649,
-        "narHash": "sha256-VFkNyxHxkqGp8gf8kfFMW1j6XeBy609kv6TE9uF/0Js=",
-        "owner": "ipetkov",
-        "repo": "crane",
-        "rev": "4b6527687cfd20da3c2ef8287e01b74c2d6c705b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ipetkov",
-        "ref": "v0.23.0",
-        "repo": "crane",
-        "type": "github"
-      }
-    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -184,26 +168,31 @@
     },
     "nix-lib": {
       "inputs": {
-        "crane": "crane_2",
+        "crane": [
+          "crane"
+        ],
         "flake-parts": "flake-parts_2",
         "flake-utils": "flake-utils_2",
         "nixpkgs": [
           "nixpkgs"
         ],
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "rust-overlay": "rust-overlay",
+        "rust-overlay": [
+          "rust-overlay"
+        ],
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1769766559,
-        "narHash": "sha256-qdSXnyhIlB/LHOJHLV92M5UpOx4jLPHYTg+eKiaCvmg=",
+        "lastModified": 1771851264,
+        "narHash": "sha256-v74KRIEKg0kAGDBrhPO8eJQ1BPnSrM6wsQlhOnCvZXI=",
         "owner": "hoprnet",
         "repo": "nix-lib",
-        "rev": "a5a05fb545a3de0e34664c8b5627c1adfee5bd4b",
+        "rev": "1f198bb6794c709259f0904cb24aad52faf891f8",
         "type": "github"
       },
       "original": {
         "owner": "hoprnet",
+        "ref": "ausias/export-docker-image",
         "repo": "nix-lib",
         "type": "github"
       }
@@ -304,33 +293,11 @@
         "nixpkgs": "nixpkgs",
         "nixpkgs-unstable": "nixpkgs-unstable_2",
         "pre-commit": "pre-commit",
-        "rust-overlay": "rust-overlay_2",
+        "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix_2"
       }
     },
     "rust-overlay": {
-      "inputs": {
-        "nixpkgs": [
-          "nix-lib",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1766630657,
-        "narHash": "sha256-wW15buPGU29v0XuAmDkc30+d5j4Tmg/V8AkpHH+hDWY=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "3bf67c5e473f29ca79ff15904f3072d87cf6d087",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "ref": "master",
-        "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "rust-overlay_2": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
