@@ -164,14 +164,6 @@
             };
           };
 
-          dockerBuildApps = {
-            docker-hopli-x86_64-linux = nixLib.mkDockerBuildApp hopliDocker.docker-hopli-x86_64-linux;
-            docker-hopli-aarch64-linux = nixLib.mkDockerBuildApp hopliDocker.docker-hopli-aarch64-linux;
-            docker-hopli-x86_64-linux-dev = nixLib.mkDockerBuildApp hopliDocker.docker-hopli-x86_64-linux-dev;
-            docker-hopli-x86_64-linux-profile = nixLib.mkDockerBuildApp hopliDocker.docker-hopli-x86_64-linux-profile;
-          };
-
-
           pre-commit-check = pre-commit.lib.${system}.run {
             src = ./.;
             hooks = {
@@ -362,7 +354,7 @@
 
           checks = { inherit (hopliPackages) hopli-clippy; };
 
-          apps = dockerBuildApps // {
+          apps = {
             inherit update-github-labels;
             check = run-check;
             audit = run-audit;
