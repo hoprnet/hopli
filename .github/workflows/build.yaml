@@ -62,7 +62,7 @@ jobs:
       id-token: write
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      version_type: "commit"
+      version_type: commit
       build_matrix: >-
         [
           {
@@ -76,9 +76,9 @@ jobs:
             "build_command": "nix build -L .#docker-hopli-aarch64-linux"
           }
         ]
-      cachix_cache_name: "hopli"
-      build_file: "Cargo.toml"
-      docker_image_name: "hopli"
+      cachix_cache_name: hopli
+      docker_image_name: hopli
+      docker_image_format: skopeo
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
     secrets:
       gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
