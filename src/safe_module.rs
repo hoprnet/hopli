@@ -139,7 +139,7 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
 };
-use hopr_crypto_types::keypairs::Keypair;
+use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{

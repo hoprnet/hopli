@@ -17,7 +17,7 @@ use hopr_bindings::{
     hopr_token::HoprToken::{sendCall, transferCall},
     hopr_winning_probability_oracle::HoprWinningProbabilityOracle::setWinProbCall,
 };
-use hopr_internal_types::prelude::WinningProbability;
+use hopr_types::internal::prelude::WinningProbability;
 use tracing::{debug, info};
 
 use crate::{
