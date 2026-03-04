@@ -12,7 +12,6 @@
     nix-lib.url = "github:hoprnet/nix-lib/ausias/export-docker-image";
 
     # Rust build system
-    crane.url = "github:ipetkov/crane/v0.21.0";
     rust-overlay.url = "github:oxalica/rust-overlay/master";
 
     # Development tools and quality assurance
@@ -27,7 +26,6 @@
     foundry.inputs.nixpkgs.follows = "nixpkgs";
     nix-lib.inputs.nixpkgs.follows = "nixpkgs";
     pre-commit.inputs.nixpkgs.follows = "nixpkgs";
-    nix-lib.inputs.crane.follows = "crane";
     nix-lib.inputs.rust-overlay.follows = "rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
@@ -41,7 +39,6 @@
       flake-utils,
       flake-parts,
       rust-overlay,
-      crane,
       nix-lib,
       foundry,
       pre-commit,
@@ -81,9 +78,6 @@
 
           # Import nix-lib for this system
           nixLib = nix-lib.lib.${system};
-
-          # Crane library for Rust builds (for crate info extraction)
-          craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default);
 
           # Use nix-lib to create all rust builders for cross-compilation
           builders = nixLib.mkRustBuilders {
