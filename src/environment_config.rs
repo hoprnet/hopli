@@ -21,7 +21,7 @@ use hopr_bindings::{
         transports::http::ReqwestTransport,
     },
 };
-use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
+use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::HelperErrors;

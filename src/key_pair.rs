@@ -15,8 +15,10 @@ use std::{
 
 use clap::{Parser, ValueHint};
 use hopr_crypto_keypair::key_pair::{HoprKeys, IdentityRetrievalModes};
-use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
-use hopr_primitive_types::primitives::Address;
+use hopr_types::{
+    crypto::keypairs::{ChainKeypair, Keypair},
+    primitive::primitives::Address,
+};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 

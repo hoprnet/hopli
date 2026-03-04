@@ -33,9 +33,11 @@ use hopr_bindings::{
         HoprWinningProbabilityOracle, HoprWinningProbabilityOracle::HoprWinningProbabilityOracleInstance,
     },
 };
-use hopr_chain_types::{ContractAddresses, errors::ChainTypesError};
 use hopr_crypto_keypair::errors::KeyPairError;
-use hopr_crypto_types::{keypairs::ChainKeypair, prelude::Keypair};
+use hopr_types::{
+    chain::{ContractAddresses, errors::ChainTypesError},
+    crypto::{keypairs::ChainKeypair, prelude::Keypair},
+};
 use thiserror::Error;
 use tracing::debug;
 
@@ -170,13 +172,13 @@ pub enum HelperErrors {
 }
 
 // Used instead of From implementation to avoid alloy being a dependency of the primitive crates
-/// Converts [`alloy::primitives::Address`] into [`hopr_primitive_types::prelude::Address`]
-pub fn h2a(h: alloy::primitives::Address) -> hopr_primitive_types::prelude::Address {
-    hopr_primitive_types::prelude::Address::from(h.0.0)
+/// Converts [`alloy::primitives::Address`] into [`hopr_types::primitive::prelude::Address`]
+pub fn h2a(h: alloy::primitives::Address) -> hopr_types::primitive::prelude::Address {
+    hopr_types::primitive::prelude::Address::from(h.0.0)
 }
 
-/// Converts [`hopr_primitive_types::prelude::Address`] into [`alloy::primitives::Address`]
-pub fn a2h(a: hopr_primitive_types::prelude::Address) -> alloy::primitives::Address {
+/// Converts [`hopr_types::primitive::prelude::Address`] into [`alloy::primitives::Address`]
+pub fn a2h(a: hopr_types::primitive::prelude::Address) -> alloy::primitives::Address {
     alloy::primitives::Address::from_slice(a.as_ref())
 }
 
@@ -566,7 +568,7 @@ pub fn create_anvil(block_time: Option<std::time::Duration>) -> alloy::node_bind
 
 /// Creates a transaction that transfers the given `amount` of native tokens to the
 /// given destination.
-pub fn create_native_transfer<N>(to: hopr_primitive_types::prelude::Address, amount: U256) -> N::TransactionRequest
+pub fn create_native_transfer<N>(to: hopr_types::primitive::prelude::Address, amount: U256) -> N::TransactionRequest
 where
     N: alloy::providers::Network,
 {
@@ -576,7 +578,7 @@ where
 /// Funds the given wallet address with specified amount of native tokens and HOPR tokens.
 /// These must be present in the client's wallet.
 pub async fn fund_node<P, N>(
-    node: hopr_primitive_types::prelude::Address,
+    node: hopr_types::primitive::prelude::Address,
     native_token: U256,
     hopr_token: U256,
     hopr_token_contract: HoprTokenInstance<P, N>,
@@ -609,7 +611,7 @@ where
 /// Funds the channel to the counterparty with the given amount of HOPR tokens.
 /// The amount must be present in the wallet of the client.
 pub async fn fund_channel<P, N>(
-    counterparty: hopr_primitive_types::prelude::Address,
+    counterparty: hopr_types::primitive::prelude::Address,
     hopr_token: HoprTokenInstance<P, N>,
     hopr_channels: HoprChannelsInstance<P, N>,
     amount: U256,
@@ -638,9 +640,9 @@ where
 /// Funds the channel to the counterparty with the given amount of HOPR tokens, from a different client
 /// The amount must be present in the wallet of the client.
 pub async fn fund_channel_from_different_client<P, N>(
-    counterparty: hopr_primitive_types::prelude::Address,
-    hopr_token_address: hopr_primitive_types::prelude::Address,
-    hopr_channels_address: hopr_primitive_types::prelude::Address,
+    counterparty: hopr_types::primitive::prelude::Address,
+    hopr_token_address: hopr_types::primitive::prelude::Address,
+    hopr_channels_address: hopr_types::primitive::prelude::Address,
     amount: U256,
     new_client: P,
 ) -> ContractResult<()>
@@ -671,7 +673,7 @@ where
 /// Prepare a safe transaction
 pub async fn get_safe_tx<P, N>(
     safe_contract: SafeContractInstance<P, N>,
-    target: hopr_primitive_types::prelude::Address,
+    target: hopr_types::primitive::prelude::Address,
     inner_tx_data: Bytes,
     wallet: PrivateKeySigner,
 ) -> anyhow::Result<N::TransactionRequest>
@@ -724,9 +726,9 @@ where
 /// Send a Safe transaction to the module to include node to the module
 pub async fn include_node_to_module_by_safe<P, N>(
     provider: P,
-    safe_address: hopr_primitive_types::prelude::Address,
-    module_address: hopr_primitive_types::prelude::Address,
-    node_address: hopr_primitive_types::prelude::Address,
+    safe_address: hopr_types::primitive::prelude::Address,
+    module_address: hopr_types::primitive::prelude::Address,
+    node_address: hopr_types::primitive::prelude::Address,
     deployer: &ChainKeypair, // also node address
 ) -> anyhow::Result<()>
 where
@@ -764,9 +766,9 @@ where
 /// Send a Safe transaction to the module to include annoucement to the module
 pub async fn add_announcement_as_target<P, N>(
     provider: P,
-    safe_address: hopr_primitive_types::prelude::Address,
-    module_address: hopr_primitive_types::prelude::Address,
-    announcement_contract_address: hopr_primitive_types::prelude::Address,
+    safe_address: hopr_types::primitive::prelude::Address,
+    module_address: hopr_types::primitive::prelude::Address,
+    announcement_contract_address: hopr_types::primitive::prelude::Address,
     deployer: &ChainKeypair, // also node address
 ) -> ContractResult<()>
 where
@@ -800,9 +802,9 @@ where
 /// Send a Safe transaction to the token contract, to approve channels on behalf of safe.
 pub async fn approve_channel_transfer_from_safe<P, N>(
     provider: P,
-    safe_address: hopr_primitive_types::prelude::Address,
-    token_address: hopr_primitive_types::prelude::Address,
-    channel_address: hopr_primitive_types::prelude::Address,
+    safe_address: hopr_types::primitive::prelude::Address,
+    token_address: hopr_types::primitive::prelude::Address,
+    channel_address: hopr_types::primitive::prelude::Address,
     deployer: &ChainKeypair, // also node address
 ) -> ContractResult<()>
 where
@@ -842,14 +844,14 @@ pub async fn deploy_one_safe_one_module_and_setup_for_testing<P>(
     provider: P,
     deployer: &ChainKeypair,
 ) -> ContractResult<(
-    hopr_primitive_types::prelude::Address,
-    hopr_primitive_types::prelude::Address,
+    hopr_types::primitive::prelude::Address,
+    hopr_types::primitive::prelude::Address,
 )>
 where
     P: alloy::providers::Provider + Clone,
 {
     // Get deployer address
-    let self_address: hopr_primitive_types::prelude::Address = deployer.public().to_address();
+    let self_address: hopr_types::primitive::prelude::Address = deployer.public().to_address();
 
     // Check if safe suite has been deployed. If so, skip this step
     let code = provider.get_code_at(SAFE_SINGLETON_ADDRESS).await?;
