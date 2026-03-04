@@ -38,7 +38,7 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
     hopr_token::HoprToken::{HoprTokenInstance, approveCall},
 };
-use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
+use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
@@ -1339,13 +1339,13 @@ pub type AnvilRpcClient = FillProvider<
 /// Used for testing. Creates RPC client to the local Anvil instance.
 pub fn create_rpc_client_to_anvil(
     anvil: &hopr_bindings::exports::alloy::node_bindings::AnvilInstance,
-    signer: &hopr_crypto_types::keypairs::ChainKeypair,
+    signer: &hopr_types::crypto::keypairs::ChainKeypair,
 ) -> Arc<AnvilRpcClient> {
     use hopr_bindings::exports::alloy::{
         providers::ProviderBuilder, rpc::client::ClientBuilder, signers::local::PrivateKeySigner,
         transports::http::ReqwestTransport,
     };
-    use hopr_crypto_types::keypairs::Keypair;
+    use hopr_types::crypto::keypairs::Keypair;
 
     let wallet = PrivateKeySigner::from_slice(signer.secret().as_ref()).expect("failed to construct wallet");
 
@@ -1370,8 +1370,10 @@ mod tests {
         hopr_node_stake_factory::HoprNodeStakeFactory,
         hopr_token::HoprToken,
     };
-    use hopr_crypto_types::keypairs::{ChainKeypair, Keypair};
-    use hopr_primitive_types::prelude::BytesRepresentable;
+    use hopr_types::{
+        crypto::keypairs::{ChainKeypair, Keypair},
+        primitive::prelude::BytesRepresentable,
+    };
     use tracing_subscriber::{EnvFilter, Registry, fmt, prelude::*};
 
     use super::*;
@@ -1395,8 +1397,8 @@ mod tests {
 
     fn get_random_address_for_testing() -> Address {
         // Creates a random Ethereum address, only used for testing
-        Address::new(hopr_crypto_random::random_bytes::<
-            { hopr_primitive_types::primitives::Address::SIZE },
+        Address::new(hopr_types::crypto_random::random_bytes::<
+            { hopr_types::primitive::primitives::Address::SIZE },
         >())
     }
 

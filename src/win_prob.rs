@@ -25,7 +25,7 @@ use clap::{Parser, builder::ValueParser};
 use hopr_bindings::{
     exports::alloy::primitives::aliases::U56, hopr_winning_probability_oracle::HoprWinningProbabilityOracle,
 };
-use hopr_internal_types::{prelude::WinningProbability, tickets::EncodedWinProb};
+use hopr_types::internal::{prelude::WinningProbability, tickets::EncodedWinProb};
 use tracing::{debug, info};
 
 use crate::{
