@@ -18,47 +18,6 @@ concurrency:
 permissions:
   contents: write
 jobs:
-  build-docker:
-    name: Docker ${{ matrix.architecture }}
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-image.yaml@build-docker-image-v1
-    strategy:
-      matrix:
-        include:
-          - architecture: x86_64-linux
-            command: nix run -L .#hopli-docker-build-and-upload
-    permissions:
-      contents: read
-    with:
-      source_branch: ${{ github.ref }}
-      version_type: "release"
-      architecture: ${{ matrix.architecture }}
-      cachix_cache_name: "hopli"
-      build_file: "Cargo.toml"
-      build_command: ${{ matrix.command }}
-      docker_image_name: "hopli"
-      fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
-    secrets:
-      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
-      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
-      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
-  build-docker-manifest:
-    name: Docker manifest
-    needs: build-docker
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker-manifest.yaml@build-docker-manifest-v1
-    permissions:
-      contents: read
-      security-events: write
-      id-token: write
-    with:
-      version_type: "release"
-      docker_image_name: "hopli"
-      docker_build_version: ${{ needs.build-docker.outputs.docker_build_version }}
-      docker_debug_version: ${{ needs.build-docker.outputs.docker_debug_version }}
-    secrets:
-      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
-      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
-      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
   build-binaries:
     name: Binary ${{ matrix.architecture }}
     strategy:
@@ -67,8 +26,17 @@ jobs:
         include:
           - architecture: x86_64-linux
             runner: self-hosted-hoprnet-bigger
-            build_command: nix build -L .#hopli-x86_64-linux
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v1
+            build_command: nix build -L .#binary-hopli-x86_64-linux
+          - architecture: aarch64-linux
+            runner: self-hosted-hoprnet-bigger
+            build_command: nix build -L .#binary-hopli-aarch64-linux
+          - architecture: x86_64-darwin
+            runner: macos-15-intel
+            build_command: nix build -L .#binary-hopli-x86_64-darwin
+          - architecture: aarch64-darwin
+            runner: macos-15-xlarge
+            build_command: nix build -L .#binary-hopli-aarch64-darwin
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v2
     permissions:
       contents: read
     with:
@@ -81,27 +49,62 @@ jobs:
       binary: hopli
       runner: ${{ matrix.runner }}
     secrets:
-      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
+      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
+  build-docker:
+    name: Docker
+    needs: build-binaries
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@build-docker-v1
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      source_branch: ${{ github.ref_name }}
+      version_type: release
+      build_matrix: >-
+        [
+          {
+            "runner": "self-hosted-hoprnet-bigger",
+            "architecture": "x86_64-linux",
+            "build_command": "nix build -L .#docker-hopli-x86_64-linux"
+          },
+          {
+            "runner": "self-hosted-hoprnet-bigger",
+            "architecture": "aarch64-linux",
+            "build_command": "nix build -L .#docker-hopli-aarch64-linux"
+          }
+        ]
+      cachix_cache_name: hopli
+      docker_image_name: hopli
+      docker_image_format: skopeo
+      fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
+    secrets:
+      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
   release:
     name: Close release
     needs:
-      - build-docker-manifest
       - build-binaries
+      - build-docker
     runs-on: self-hosted-hoprnet-small
     permissions:
       contents: write
     steps:
       - name: Release version
-        uses: hoprnet/hopr-workflows/actions/release-version@dc45f200b11bbc192a8a0766f22d1e6ba680e8b1 # release-version-v1
+        uses: hoprnet/hopr-workflows/actions/release-version@27fb7c9ad22da3361b1fb783c61ce06aa39dd62a # release-version-v2
         with:
           source_branch: ${{ github.ref_name }}
           file: Cargo.toml
           release_type: "${{ inputs.release_type }}"
+          package_name: hopli
+          cachix_cache_name: "hopli"
+          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           zulip_api_key: ${{ secrets.ZULIP_API_KEY }}
           zulip_email: ${{ secrets.ZULIP_EMAIL }}
           zulip_channel: "Hoprd"
           zulip_topic: "Releases"
-          gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY}}
+          gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
           github_token: ${{ secrets.GH_RUNNER_TOKEN }}

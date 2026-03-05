@@ -2,24 +2,31 @@
   description = "hopli application";
 
   inputs = {
+    # Core Nix ecosystem dependencies
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # HOPR Nix Library (provides flake-utils and reusable build functions)
+    nix-lib.url = "github:hoprnet/nix-lib/ausias/export-docker-image";
+
+    # Rust build system
     rust-overlay.url = "github:oxalica/rust-overlay/master";
-    crane.url = "github:ipetkov/crane/v0.21.0";
-    nix-lib.url = "github:hoprnet/nix-lib";
-    # pin it to a version which we are compatible with
+
+    # Development tools and quality assurance
     foundry.url = "github:hoprnet/foundry.nix/tb/202505-add-xz";
     pre-commit.url = "github:cachix/git-hooks.nix";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     flake-root.url = "github:srid/flake-root";
 
+    # Input dependency optimization
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
     foundry.inputs.flake-utils.follows = "flake-utils";
     foundry.inputs.nixpkgs.follows = "nixpkgs";
     nix-lib.inputs.nixpkgs.follows = "nixpkgs";
     pre-commit.inputs.nixpkgs.follows = "nixpkgs";
+    nix-lib.inputs.rust-overlay.follows = "rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -32,7 +39,6 @@
       flake-utils,
       flake-parts,
       rust-overlay,
-      crane,
       nix-lib,
       foundry,
       pre-commit,
@@ -40,7 +46,7 @@
     }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
-        inputs.treefmt-nix.flakeModule
+        inputs.nix-lib.flakeModules.default
         inputs.flake-root.flakeModule
       ];
       perSystem =
@@ -51,21 +57,27 @@
           ...
         }:
         let
+          # Git revision for version tracking
           rev = toString (self.shortRev or self.dirtyShortRev);
+
+          # Filesystem utilities for source filtering
           fs = lib.fileset;
+
           localSystem = system;
+
+          # Nixpkgs with rust-overlay and foundry overlay
           overlays = [
             (import rust-overlay)
             foundry.overlay
           ];
           pkgs = import nixpkgs { inherit localSystem overlays; };
           pkgsUnstable = import nixpkgs-unstable { inherit localSystem overlays; };
+
+          # Platform information
           buildPlatform = pkgs.stdenv.buildPlatform;
 
-          # Import nix-lib for shared Nix utilities
+          # Import nix-lib for this system
           nixLib = nix-lib.lib.${system};
-
-          craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default);
 
           # Use nix-lib to create all rust builders for cross-compilation
           builders = nixLib.mkRustBuilders {
@@ -73,19 +85,6 @@
             rustToolchainFile = ./rust-toolchain.toml;
           };
 
-          # Convenience aliases for builders
-          rust-builder-local = builders.local;
-          rust-builder-x86_64-linux = builders.x86_64-linux;
-          rust-builder-x86_64-darwin = builders.x86_64-darwin;
-          rust-builder-aarch64-linux = builders.aarch64-linux;
-          rust-builder-aarch64-darwin = builders.aarch64-darwin;
-
-          # Nightly builder for docs and specific features
-          rust-builder-local-nightly = nixLib.mkRustBuilder {
-            inherit localSystem;
-            rustToolchainFile = ./rust-toolchain.toml;
-            useRustNightly = true;
-          };
           # Use nix-lib's source filtering for better rebuild performance
           depsSrc = nixLib.mkDepsSrc {
             root = ./.;
@@ -105,32 +104,10 @@
             extraFiles = [ (fs.fileFilter (file: file.hasExt "snap") ./.) ];
           };
 
-          hopliBuildArgs = {
-            inherit src depsSrc rev;
-            cargoExtraArgs = "-F allocator-jemalloc";
-            cargoToml = ./Cargo.toml;
+          hopliPackages = import ./nix/packages/hopli.nix {
+            inherit builders src depsSrc rev buildPlatform nixLib;
           };
 
-          hopli = rust-builder-local.callPackage nixLib.mkRustPackage hopliBuildArgs;
-
-          # also used for Docker image
-          hopli-x86_64-linux = rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage hopliBuildArgs;
-          # also used for Docker image
-          hopli-x86_64-linux-dev = rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs // { CARGO_PROFILE = "dev"; }
-          );
-          hopli-aarch64-linux = rust-builder-aarch64-linux.callPackage nixLib.mkRustPackage hopliBuildArgs;
-          # CAVEAT: must be built from a darwin system
-          hopli-x86_64-darwin = rust-builder-x86_64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
-          # CAVEAT: must be built from a darwin system
-          hopli-aarch64-darwin = rust-builder-aarch64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
-          hopli-clippy = rust-builder-local.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs // { runClippy = true; }
-          );
-
-          hopli-dev = rust-builder-local.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs // { CARGO_PROFILE = "dev"; }
-          );
           profileDeps = with pkgs; [
             gdb
             # FIXME: heaptrack would be useful, but it adds 700MB to the image size (unpacked)
@@ -150,90 +127,37 @@
             nethogs
           ];
 
-          # build candidate binary as static on Linux amd64 to get more test exposure specifically via smoke tests
-          hopli-candidate =
-            if buildPlatform.isLinux && buildPlatform.isx86_64 then
-              rust-builder-x86_64-linux.callPackage nixLib.mkRustPackage (
-                hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
-              )
-            else
-              rust-builder-local.callPackage nixLib.mkRustPackage (
-                hopliBuildArgs // { CARGO_PROFILE = "candidate"; }
-              );
-
-          # Man pages using nix-lib
-          hopli-man = nixLib.mkManPage {
-            pname = "hopli";
-            binary = hopli-dev;
-            description = "Hopli CLI helper tool";
-          };
-
           # FIXME: the docker image built is not working on macOS arm platforms
           # and will simply lead to a non-working image. Likely, some form of
           # cross-compilation or distributed build is required.
           # Docker images using nix-lib
-          hopli-docker = nixLib.mkDockerImage {
-            name = "hopli";
-            extraContents = [ hopli-x86_64-linux ];
-            Entrypoint = [ "/bin/hopli" ];
-            env = [ "ETHERSCAN_API_KEY=placeholder" ];
-          };
-          hopli-dev-docker = nixLib.mkDockerImage {
-            name = "hopli";
-            extraContents = [ hopli-x86_64-linux-dev ];
-            Entrypoint = [ "/bin/hopli" ];
-            env = [ "ETHERSCAN_API_KEY=placeholder" ];
-          };
-          hopli-profile-docker = nixLib.mkDockerImage {
-            name = "hopli";
-            extraContents = [ hopli-x86_64-linux ] ++ profileDeps;
-            Entrypoint = [ "/bin/hopli" ];
-            env = [ "ETHERSCAN_API_KEY=placeholder" ];
-          };
-
-          # Docker security scanning and SBOM generation using nix-lib
-          hopli-docker-trivy = nixLib.mkTrivyScan {
-            image = hopli-docker;
-            imageName = "hopli";
-          };
-          hopli-docker-sbom = nixLib.mkSBOM {
-            image = hopli-docker;
-            imageName = "hopli";
+          hopliDocker = {
+            docker-hopli-x86_64-linux = nixLib.mkDockerImage {
+              name = "hopli";
+              extraContents = [ hopliPackages.binary-hopli-x86_64-linux ];
+              Entrypoint = [ "/bin/hopli" ];
+              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+            };
+            docker-hopli-aarch64-linux = nixLib.mkDockerImage {
+              name = "hopli";
+              extraContents = [ hopliPackages.binary-hopli-aarch64-linux ];
+              Entrypoint = [ "/bin/hopli" ];
+              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+            };
+            docker-hopli-x86_64-linux-dev = nixLib.mkDockerImage {
+              name = "hopli";
+              extraContents = [ hopliPackages.binary-hopli-x86_64-linux-dev ];
+              Entrypoint = [ "/bin/hopli" ];
+              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+            };
+            docker-hopli-x86_64-linux-profile = nixLib.mkDockerImage {
+              name = "hopli";
+              extraContents = [ hopliPackages.binary-hopli-x86_64-linux ] ++ profileDeps;
+              Entrypoint = [ "/bin/hopli" ];
+              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+            };
           };
 
-          # Multi-arch Docker manifests using nix-lib
-          # NOTE: These require images for both amd64 and arm64 to be pushed to a registry first
-          # hopli-docker-multiarch = nixLib.mkMultiArchManifest {
-          #   name = "hopli";
-          #   tag = "latest";
-          #   images = [
-          #     { arch = "amd64"; digest = "sha256:..."; }
-          #     { arch = "arm64"; digest = "sha256:..."; }
-          #   ];
-          # };
-
-          dockerImageUploadScript =
-            image:
-            pkgs.writeShellScriptBin "docker-image-upload" ''
-              set -eu
-              OCI_ARCHIVE="$(nix build --no-link --print-out-paths ${image})"
-              ${pkgs.skopeo}/bin/skopeo copy --insecure-policy \
-                --dest-registry-token="$GOOGLE_ACCESS_TOKEN" \
-                "docker-archive:$OCI_ARCHIVE" "docker://$IMAGE_TARGET"
-              echo "Uploaded image to $IMAGE_TARGET"
-            '';
-          hopli-docker-build-and-upload = flake-utils.lib.mkApp {
-            drv = dockerImageUploadScript hopli-docker;
-          };
-          hopli-dev-docker-build-and-upload = flake-utils.lib.mkApp {
-            drv = dockerImageUploadScript hopli-dev-docker;
-          };
-          hopli-profile-docker-build-and-upload = flake-utils.lib.mkApp {
-            drv = dockerImageUploadScript hopli-profile-docker;
-          };
-          docs = rust-builder-local-nightly.callPackage nixLib.mkRustPackage (
-            hopliBuildArgs // { buildDocs = true; }
-          );
           pre-commit-check = pre-commit.lib.${system}.run {
             src = ./.;
             hooks = {
@@ -420,43 +344,19 @@
             programs.nixfmt.enable = true;
             programs.taplo.enable = true;
             programs.ruff-format.enable = true;
-
-            settings.formatter.rustfmt = {
-              command = "${pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default)}/bin/rustfmt";
-            };
           };
 
-          checks = { inherit hopli-clippy; };
+          checks = { inherit (hopliPackages) hopli-clippy; };
 
           apps = {
-            inherit hopli-docker-build-and-upload;
-            inherit hopli-dev-docker-build-and-upload;
-            inherit hopli-profile-docker-build-and-upload;
             inherit update-github-labels;
             check = run-check;
             audit = run-audit;
           };
 
-          packages = {
-            inherit
-              hopli
-              hopli-dev
-              hopli-docker
-              hopli-dev-docker
-              hopli-profile-docker
-              ;
-            inherit hopli-candidate;
-            inherit docs;
+          packages = hopliPackages // hopliDocker // {
             inherit pre-commit-check;
-            inherit hopli-man;
-            # binary packages
-            inherit hopli-x86_64-linux hopli-x86_64-linux-dev;
-            inherit hopli-aarch64-linux;
-            # FIXME: Darwin cross-builds are currently broken.
-            # Follow https://github.com/nixos/nixpkgs/pull/256590
-            inherit hopli-x86_64-darwin;
-            inherit hopli-aarch64-darwin;
-            default = hopli;
+            default = hopliPackages.hopli;
           };
 
           devShells.default = devShell;
