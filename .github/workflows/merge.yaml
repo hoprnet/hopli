@@ -1,11 +1,11 @@
-name: MergePR
+name: Merge
 on:
   pull_request:
     types:
       - closed
       # - synchronize
 concurrency:
-  group: merge
+  group: merge-${{ github.event.pull_request.base.ref }}
   cancel-in-progress: false
 permissions:
   contents: read
@@ -34,10 +34,10 @@ jobs:
       contents: read
     with:
       source_branch: ${{ github.event.pull_request.base.ref }}
-      version_type: "pr"
+      version_type: pr
       architecture: ${{ matrix.architecture }}
-      cachix_cache_name: "hopli"
-      build_file: "Cargo.toml"
+      cachix_cache_name: hopli
+      build_file: Cargo.toml
       build_command: ${{ matrix.build_command }}
       binary: hopli
       runner: ${{ matrix.runner }}
