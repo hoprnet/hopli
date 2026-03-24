@@ -49,7 +49,7 @@ jobs:
       binary: hopli
       runner: ${{ matrix.runner }}
     secrets:
-      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+      gcp_service_account: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
   build-docker:
@@ -80,7 +80,7 @@ jobs:
       docker_image_format: skopeo
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
     secrets:
-      gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+      gcp_service_account: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
       docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
@@ -94,7 +94,7 @@ jobs:
       contents: write
     steps:
       - name: Release version
-        uses: hoprnet/hopr-workflows/actions/release-version@27fb7c9ad22da3361b1fb783c61ce06aa39dd62a # release-version-v2
+        uses: hoprnet/hopr-workflows/actions/release-version@0d6e82b5bfb948c58ac2f850a331443054486565 # release-version-v2
         with:
           source_branch: ${{ github.ref_name }}
           file: Cargo.toml
@@ -106,5 +106,5 @@ jobs:
           zulip_email: ${{ secrets.ZULIP_EMAIL }}
           zulip_channel: "Hoprd"
           zulip_topic: "Releases"
-          gcp_service_account: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+          gcp_service_account: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
           github_token: ${{ secrets.GH_RUNNER_TOKEN }}
