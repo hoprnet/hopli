@@ -75,4 +75,23 @@ jobs:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
       docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
+  notify:
+    name: Notify failure
+    needs:
+      - build-binaries
+      - build-docker
+    if: ${{ always() && failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify failed merge pipeline
+        uses: zulip/github-actions-zulip/send-message@e4c8f27c732ba9bd98ac6be0583096dea82feea5 # v1.0.2
+        with:
+          api-key: ${{ secrets.ZULIP_API_KEY }}
+          email: ${{ secrets.ZULIP_EMAIL }}
+          organization-url: "https://hopr.zulipchat.com"
+          type: "stream"
+          to: "HOPRd"
+          topic: "Core"
+          content: |
+            The merge pipeline has failed for pull request [#${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
