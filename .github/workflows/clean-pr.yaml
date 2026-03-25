@@ -29,7 +29,7 @@ jobs:
         id: gcp
         uses: hoprnet/hopr-workflows/actions/setup-gcp@12c56020e16036982e6cc529848edeedfc705865 # master
         with:
-          google-credentials: ${{ secrets.GOOGLE_HOPRASSOCIATION_CREDENTIALS_REGISTRY }}
+          google-credentials: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
           login-artifact-registry: 'true'
           install-sdk: 'true'
       - name: Cleanup Github pipeline cache

@@ -1,9 +1,9 @@
 #################################################################################
-# Pipeline to check opened PR labels and title.
+# Pipeline to check opened PR labels and title
 #################################################################################
 name: Open PR
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - reopened
@@ -70,6 +70,7 @@ jobs:
         with:
           sync-labels: true
       - name: Add "external" label for forked PRs
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_REPO: ${{ github.repository }}
