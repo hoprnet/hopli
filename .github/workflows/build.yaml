@@ -44,10 +44,8 @@ jobs:
       contents: read
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      version_type: "commit"
+      version_type: commit
       architecture: ${{ matrix.architecture }}
-      cachix_cache_name: "hopli"
-      build_file: "Cargo.toml"
       build_command: ${{ matrix.build_command }}
       binary: hopli
       runner: ${{ matrix.runner }}
@@ -81,7 +79,6 @@ jobs:
             "build_command": "nix build -L .#docker-hopli-aarch64-linux"
           }
         ]
-      cachix_cache_name: hopli
       docker_image_name: hopli
       docker_image_format: skopeo
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}

@@ -30,8 +30,6 @@ jobs:
       source_branch: ${{ github.event.pull_request.base.ref }}
       version_type: pr
       architecture: ${{ matrix.architecture }}
-      cachix_cache_name: hopli
-      build_file: Cargo.toml
       build_command: ${{ matrix.build_command }}
       binary: hopli
       runner: ${{ matrix.runner }}
