@@ -1,45 +1,25 @@
+---
 name: Zizmor
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: [".github/**"]
   merge_group:
     types: [checks_requested]
-  workflow_call:
-    inputs:
-      source_branch:
-        required: true
-        type: string
 concurrency:
-  group: ${{ inputs.source_branch || github.ref_name }}-zizmor
+  group: ${{ github.event.pull_request.head.ref || github.ref_name }}-zizmor
   cancel-in-progress: true
-permissions: {}
+permissions:
+  contents: read
+  security-events: write
 jobs:
   zizmor:
-    name: Zizmor
-    runs-on: self-hosted-hoprnet-bigger
+    uses: hoprnet/hopr-workflows/.github/workflows/checks-zizmor.yaml@53b3fdc9b49573bce5e53421c6cd3f261141f89c # checks-zizmor-v1
     permissions:
       contents: read
       security-events: write
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
-        with:
-          disable-sudo: true
-          egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-      - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.source_branch }}
-      - name: Setup Nix
-        uses: hoprnet/hopr-workflows/actions/setup-nix@15db9fb5571957317b77567abef997b1554f2fbb # setup-nix-v1
-        with:
-          cachix_cache_name: hopli
-          cachix_auth_token: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - name: Run zizmor
-        run: nix develop -L .#ci -c bash -c "zizmor --format sarif . > results.sarif"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@014f16e7ab1402f30e7c3329d33797e7948572db # v4.31.3
-        with:
-          sarif_file: results.sarif
-          category: zizmor
+    with:
+      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+      runner: self-hosted-hoprnet-bigger
+    secrets:
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
