@@ -355,7 +355,7 @@
             coverage-unit = {
               type = "app";
               program = toString (pkgs.writeShellScript "coverage-unit" ''
-                nix develop .#coverage -c cargo llvm-cov --lib --lcov --output-path coverage.lcov
+                nix develop .#coverage -c cargo llvm-cov --workspace --all-features --lib --lcov --output-path coverage.lcov
               '');
             };
           };

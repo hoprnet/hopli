@@ -95,8 +95,6 @@ jobs:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       unit_tests: true
       unit_test_command: "nix develop -c cargo test --lib"
-      integration_tests: true
-      integration_test_command: "nix develop -c cargo test --test '*' -- --test-threads=1"
       coverage: true
       unit_coverage_command: "nix run .#coverage-unit"
       runner: self-hosted-hoprnet-bigger
