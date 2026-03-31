@@ -26,6 +26,13 @@ in
     hopliBuildArgs // { runClippy = true; }
   );
 
+  hopli-coverage = builders.localCoverage.callPackage nixLib.mkRustPackage (
+    hopliBuildArgs // {
+      runCoverage = true;
+      cargoLlvmCovExtraArgs = "--lcov --output-path $out --lib";
+    }
+  );
+
   # build candidate binary as static on Linux amd64 to get more test exposure specifically via smoke tests
   hopli-candidate =
     if buildPlatform.isLinux && buildPlatform.isx86_64 then
