@@ -373,6 +373,7 @@
             rustToolchainFile = ./rust-toolchain.toml;
             shellName = "Coverage";
             withLlvmTools = true;
+            extraPackages = [ pkgs.foundry-bin ];
           };
 
           formatter = config.treefmt.build.wrapper;
