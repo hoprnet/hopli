@@ -352,6 +352,12 @@
             inherit update-github-labels;
             check = run-check;
             audit = run-audit;
+            coverage-unit = {
+              type = "app";
+              program = toString (pkgs.writeShellScript "coverage-unit" ''
+                nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov
+              '');
+            };
           };
 
           packages = hopliPackages // hopliDocker // {
@@ -363,6 +369,12 @@
           devShells.ci = ciShell;
           devShells.docs = docsShell;
           devShells.nightly = nightlyShell;
+          devShells.coverage = nixLib.mkDevShell {
+            rustToolchainFile = ./rust-toolchain.toml;
+            shellName = "Coverage";
+            withLlvmTools = true;
+            extraPackages = [ pkgs.foundry-bin ];
+          };
 
           formatter = config.treefmt.build.wrapper;
         };

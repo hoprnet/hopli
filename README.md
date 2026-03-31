@@ -1,5 +1,7 @@
 # Hopli
 
+[![codecov](https://codecov.io/gh/hoprnet/hopli/branch/main/graph/badge.svg)](https://codecov.io/gh/hoprnet/hopli)
+
 `hopli` is a CLI for common HOPR operator workflows:
 
 - identity file creation and maintenance
