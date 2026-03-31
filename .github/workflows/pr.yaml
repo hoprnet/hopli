@@ -96,9 +96,7 @@ jobs:
       unit_tests: true
       unit_test_command: "nix develop -c cargo test --lib"
       coverage: true
-      unit_coverage_command: |
-        nix build -L .#hopli-coverage
-        cp result coverage.lcov
+      unit_coverage_command: "nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov"
       runner: self-hosted-hoprnet-bigger
       test_timeout: 60
     secrets:
