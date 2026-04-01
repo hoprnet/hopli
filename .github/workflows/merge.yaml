@@ -92,7 +92,7 @@ jobs:
       - build-binaries
       - build-docker
       - coverage
-    if: ${{ always() && failure() }}
+    if: ${{ always() && github.event.pull_request.merged == true && !success() }}
     runs-on: ubuntu-latest
     steps:
       - name: Notify failed merge pipeline
