@@ -13,7 +13,7 @@
 
 Prerequisites:
 
-- Rust toolchain from `rust-toolchain.toml` (currently `1.91`)
+- Rust toolchain from `rust-toolchain.toml`
 - access to an RPC endpoint for your target network
 
 Build:
