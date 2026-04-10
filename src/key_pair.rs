@@ -753,7 +753,9 @@ mod tests {
         };
 
         // when a special env is set but no cli arg, it returns the special env value
-        env::set_var("MANAGER_PK", SPECIAL_ENV_KEY);
+        unsafe {
+            env::set_var("MANAGER_PK", SPECIAL_ENV_KEY);
+        }
         if let Ok(kp_0) = pk_args_none.clone().read("MANAGER_PK") {
             assert_eq!(
                 SPECIAL_ENV_KEY,
@@ -765,7 +767,9 @@ mod tests {
         }
 
         // when env is set but no cli arg, it returns the env value
-        env::set_var("PRIVATE_KEY", DUMMY_PRIVATE_KEY);
+        unsafe {
+            env::set_var("PRIVATE_KEY", DUMMY_PRIVATE_KEY);
+        }
         if let Ok(kp_1) = pk_args_none.clone().read_default() {
             assert_eq!(
                 DUMMY_PRIVATE_KEY,
@@ -777,7 +781,9 @@ mod tests {
         }
 
         // when both env and cli args are set, it still uses cli
-        env::set_var("PRIVATE_KEY", "0123");
+        unsafe {
+            env::set_var("PRIVATE_KEY", "0123");
+        }
         if let Ok(kp_2) = pk_args_some.clone().read_default() {
             assert_eq!(
                 DUMMY_PRIVATE_KEY,
@@ -789,7 +795,9 @@ mod tests {
         }
 
         // when no env and no cli arg, it spawns an interactive CLI
-        env::remove_var("PRIVATE_KEY");
+        unsafe {
+            env::remove_var("PRIVATE_KEY");
+        }
 
         // when no env is supplied, but private key is supplied
         if let Ok(kp_3) = pk_args_some.read_default() {
@@ -838,7 +846,9 @@ mod tests {
         fs::write(PathBuf::from(path).join("fileid2"), "supersound")?;
 
         // test new_password_path
-        env::set_var("NEW_IDENTITY_PASSWORD", "ultraviolet");
+        unsafe {
+            env::set_var("NEW_IDENTITY_PASSWORD", "ultraviolet");
+        }
         if let Ok(pwd_0) = new_pwd_args_some.read_default() {
             assert_eq!(
                 pwd_0,
@@ -858,7 +868,9 @@ mod tests {
             panic!("cannot read new password from path");
         }
 
-        env::set_var("IDENTITY_PASSWORD", "Hello");
+        unsafe {
+            env::set_var("IDENTITY_PASSWORD", "Hello");
+        }
         // fail to take cli password path when both cli arg and env are supplied
         if let Ok(kp_1) = pwd_args_some.clone().read_default() {
             assert_eq!(kp_1, "Hello".to_string(), "read a wrong password from env");
@@ -873,7 +885,9 @@ mod tests {
         }
 
         // revert when no password path or identity password env is supplied
-        env::remove_var("IDENTITY_PASSWORD");
+        unsafe {
+            env::remove_var("IDENTITY_PASSWORD");
+        }
         assert!(pwd_args_none.read_default().is_err());
 
         // ok when no env is supplied but password path is supplied
