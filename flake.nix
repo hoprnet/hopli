@@ -108,6 +108,12 @@
             inherit builders src depsSrc rev buildPlatform nixLib;
           };
 
+          dockerEnv = [
+            "ETHERSCAN_API_KEY=placeholder"
+            "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            "SSL_CERT_DIR=${pkgs.cacert}/etc/ssl/certs"
+          ];
+
           profileDeps = with pkgs; [
             gdb
             # FIXME: heaptrack would be useful, but it adds 700MB to the image size (unpacked)
@@ -136,25 +142,25 @@
               name = "hopli";
               extraContents = [ hopliPackages.binary-hopli-x86_64-linux ];
               Entrypoint = [ "/bin/hopli" ];
-              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+              env = dockerEnv;
             };
             docker-hopli-aarch64-linux = nixLib.mkDockerImage {
               name = "hopli";
               extraContents = [ hopliPackages.binary-hopli-aarch64-linux ];
               Entrypoint = [ "/bin/hopli" ];
-              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+              env = dockerEnv;
             };
             docker-hopli-x86_64-linux-dev = nixLib.mkDockerImage {
               name = "hopli";
               extraContents = [ hopliPackages.binary-hopli-x86_64-linux-dev ];
               Entrypoint = [ "/bin/hopli" ];
-              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+              env = dockerEnv;
             };
             docker-hopli-x86_64-linux-profile = nixLib.mkDockerImage {
               name = "hopli";
               extraContents = [ hopliPackages.binary-hopli-x86_64-linux ] ++ profileDeps;
               Entrypoint = [ "/bin/hopli" ];
-              env = [ "ETHERSCAN_API_KEY=placeholder" ];
+              env = dockerEnv;
             };
           };
 
