@@ -3,6 +3,7 @@ ignore = [
   "RUSTSEC-2024-0436", # 'paste' dependency in 'alloy' [unmaintained]
   "RUSTSEC-2024-0388", # 'derivative' in 'alloy' [unmaintained],
   "RUSTSEC-2025-0073", # 'alloy-dyn-abi' in 'alloy' - will be removed in 4.0
+  "RUSTSEC-2026-0097", # Rand is unsound with a custom logger using `rand::rng()`
 ]
 informational_warnings = ["unmaintained"]
 severity_threshold = "low"
