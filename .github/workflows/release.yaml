@@ -30,9 +30,6 @@ jobs:
           - architecture: aarch64-linux
             runner: self-hosted-hoprnet-bigger
             build_command: nix build -L .#binary-hopli-aarch64-linux
-          - architecture: x86_64-darwin
-            runner: macos-15-intel
-            build_command: nix build -L .#binary-hopli-x86_64-darwin
           - architecture: aarch64-darwin
             runner: macos-15-xlarge
             build_command: nix build -L .#binary-hopli-aarch64-darwin
