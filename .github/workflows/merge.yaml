@@ -20,10 +20,10 @@ jobs:
       matrix:
         include:
           - architecture: x86_64-linux
-            runner: self-hosted-hoprnet-bigger
+            runner: depot-ubuntu-24.04-4
             build_command: nix build -L .#binary-hopli-x86_64-linux
           - architecture: aarch64-linux
-            runner: self-hosted-hoprnet-bigger
+            runner: depot-ubuntu-24.04-arm-4
             build_command: nix build -L .#binary-hopli-aarch64-linux
     uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v2
     permissions:
@@ -54,12 +54,12 @@ jobs:
       build_matrix: >-
         [
           {
-            "runner": "self-hosted-hoprnet-bigger",
+            "runner": "depot-ubuntu-24.04-4",
             "architecture": "x86_64-linux",
             "build_command": "nix build -L .#docker-hopli-x86_64-linux"
           },
           {
-            "runner": "self-hosted-hoprnet-bigger",
+            "runner": "depot-ubuntu-24.04-arm-4",
             "architecture": "aarch64-linux",
             "build_command": "nix build -L .#docker-hopli-aarch64-linux"
           }
