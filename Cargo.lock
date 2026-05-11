@@ -39,7 +39,7 @@ dependencies = [
  "alloy-core",
  "alloy-eips",
  "alloy-genesis",
- "alloy-json-rpc 2.0.4",
+ "alloy-json-rpc",
  "alloy-network",
  "alloy-node-bindings",
  "alloy-provider",
@@ -48,8 +48,8 @@ dependencies = [
  "alloy-serde",
  "alloy-signer",
  "alloy-signer-local",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-transport",
+ "alloy-transport-http",
  "alloy-trie",
 ]
 
@@ -120,7 +120,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
- "alloy-transport 2.0.4",
+ "alloy-transport",
  "futures",
  "futures-util",
  "serde_json",
@@ -275,21 +275,6 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-rpc"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "422d110f1c40f1f8d0e5562b0b649c35f345fccb7093d9f02729943dcd1eef71"
-dependencies = [
- "alloy-primitives",
- "alloy-sol-types",
- "http",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "alloy-json-rpc"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19e352478b756bad5d7203148e4b461861282ea2ded3da406ba24868b52cd098"
@@ -312,7 +297,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
  "alloy-eips",
- "alloy-json-rpc 2.0.4",
+ "alloy-json-rpc",
  "alloy-network-primitives",
  "alloy-primitives",
  "alloy-rpc-types-any",
@@ -400,7 +385,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
- "alloy-json-rpc 2.0.4",
+ "alloy-json-rpc",
  "alloy-network",
  "alloy-network-primitives",
  "alloy-node-bindings",
@@ -410,8 +395,8 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "alloy-sol-types",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-transport",
+ "alloy-transport-http",
  "async-stream",
  "async-trait",
  "auto_impl",
@@ -460,10 +445,10 @@ version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5beb5c2fe6b960c8e8b038e69fd502a90a2e930afa4770efb748b163b0767729"
 dependencies = [
- "alloy-json-rpc 2.0.4",
+ "alloy-json-rpc",
  "alloy-primitives",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-transport",
+ "alloy-transport-http",
  "futures",
  "pin-project",
  "reqwest",
@@ -654,34 +639,11 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8098f965442a9feb620965ba4b4be5e2b320f4ec5a3fff6bfa9e1ff7ef42bed1"
-dependencies = [
- "alloy-json-rpc 1.8.3",
- "auto_impl",
- "base64",
- "derive_more",
- "futures",
- "futures-utils-wasm",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tower",
- "tracing",
- "url",
- "wasmtimer",
-]
-
-[[package]]
-name = "alloy-transport"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ac7a80c0bac3e44559d53d002e34c461dc2f23262b42cafec019bc70551abbe"
 dependencies = [
- "alloy-json-rpc 2.0.4",
+ "alloy-json-rpc",
  "auto_impl",
  "base64",
  "derive_more",
@@ -696,25 +658,6 @@ dependencies = [
  "tracing",
  "url",
  "wasmtimer",
-]
-
-[[package]]
-name = "alloy-transport-http"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8597d36d546e1dab822345ad563243ec3920e199322cb554ce56c8ef1a1e2e7"
-dependencies = [
- "alloy-json-rpc 1.8.3",
- "alloy-transport 1.8.3",
- "itertools 0.14.0",
- "opentelemetry",
- "opentelemetry-http",
- "reqwest",
- "serde_json",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "url",
 ]
 
 [[package]]
@@ -723,13 +666,16 @@ version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eed3ed3300a998f88639ed619fdbbd88bd82865e00c6a8ecb796c99eb12358f6"
 dependencies = [
- "alloy-json-rpc 2.0.4",
- "alloy-transport 2.0.4",
+ "alloy-json-rpc",
+ "alloy-transport",
  "itertools 0.14.0",
+ "opentelemetry",
+ "opentelemetry-http",
  "reqwest",
  "serde_json",
  "tower",
  "tracing",
+ "tracing-opentelemetry",
  "url",
 ]
 
@@ -2421,7 +2367,7 @@ dependencies = [
 name = "hopli"
 version = "0.17.2"
 dependencies = [
- "alloy-transport-http 1.8.3",
+ "alloy-transport-http",
  "anyhow",
  "clap",
  "env_logger",
@@ -2490,9 +2436,9 @@ dependencies = [
 
 [[package]]
 name = "hopr-types"
-version = "1.5.4"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d918bfe437f576b2395aa776e12bf678ba652fee5085a6ce77c8355f11fbbb0"
+checksum = "b329053a0c75175828a44996657f7a01fc62704d6bff18b71d8502fefcea8f21"
 dependencies = [
  "aes",
  "anyhow",

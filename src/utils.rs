@@ -4,38 +4,24 @@ use std::str::FromStr;
 
 use SafeContract::SafeContractInstance;
 use hopr_bindings::{
-    exports::alloy::{
+    config::ContractInstances, constants::{SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141, SAFE_DEPLOYER_ADDRESS, SAFE_DEPLOYER_BALANCE, SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE, SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE, SAFE_SINGLETON_ADDRESS, SAFE_SINGLETON_DEPLOY_CODE_V141}, exports::alloy::{
         self,
         contract::{Error as ContractError, Result as ContractResult},
         hex::FromHexError,
         network::{ReceiptResponse, TransactionBuilder},
         node_bindings::{Anvil, AnvilInstance},
         primitives::{self, Address, Bytes, U256, aliases, keccak256},
-        providers::{MULTICALL3_ADDRESS, MulticallError, PendingTransactionError},
+        providers::{MulticallError, PendingTransactionError},
         rpc::types::TransactionRequest,
         signers::{Signer, local::PrivateKeySigner},
         sol,
         sol_types::{SolCall, SolValue},
         transports::TransportErrorKind,
-    },
-    hopr_announcements::{HoprAnnouncements, HoprAnnouncements::HoprAnnouncementsInstance},
-    hopr_announcements_proxy::HoprAnnouncementsProxy,
-    hopr_channels::{HoprChannels, HoprChannels::HoprChannelsInstance},
-    hopr_node_management_module::{
-        HoprNodeManagementModule, HoprNodeManagementModule::HoprNodeManagementModuleInstance,
-    },
-    hopr_node_safe_migration::{HoprNodeSafeMigration, HoprNodeSafeMigration::HoprNodeSafeMigrationInstance},
-    hopr_node_safe_registry::{HoprNodeSafeRegistry, HoprNodeSafeRegistry::HoprNodeSafeRegistryInstance},
-    hopr_node_stake_factory::{HoprNodeStakeFactory, HoprNodeStakeFactory::HoprNodeStakeFactoryInstance},
-    hopr_ticket_price_oracle::{HoprTicketPriceOracle, HoprTicketPriceOracle::HoprTicketPriceOracleInstance},
-    hopr_token::{HoprToken, HoprToken::HoprTokenInstance},
-    hopr_winning_probability_oracle::{
-        HoprWinningProbabilityOracle, HoprWinningProbabilityOracle::HoprWinningProbabilityOracleInstance,
-    },
+    }, hopr_channels::HoprChannels::HoprChannelsInstance, hopr_node_management_module::HoprNodeManagementModule, hopr_node_stake_factory::HoprNodeStakeFactory, hopr_token::HoprToken::{self, HoprTokenInstance},
 };
 use hopr_crypto_keypair::errors::KeyPairError;
 use hopr_types::{
-    chain::{ContractAddresses, errors::ChainTypesError},
+    chain::errors::ChainTypesError,
     crypto::{keypairs::ChainKeypair, prelude::Keypair},
 };
 use thiserror::Error;

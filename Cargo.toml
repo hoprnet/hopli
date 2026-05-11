@@ -1,7 +1,7 @@
 [package]
 name = "hopli"
 version = "0.17.2"
-edition = "2024"
+edition = "2021"
 license = "GPL-3.0-only"
 
 [lib]
@@ -22,7 +22,7 @@ allocator-jemalloc = [
 ] # Use jemalloc as the global allocator on Linux
 
 [dependencies]
-alloy-transport-http = { version = "1", features = ["reqwest-default-tls"] }
+alloy-transport-http = { version = "2.0.4", features = ["reqwest-default-tls"] }
 anyhow = "1.0.100"
 clap = { version = "4.5.51", features = ["derive", "env", "string"] }
 hex = "0.4.3"
@@ -48,7 +48,7 @@ uuid = { version = "1.18.1" }
 url = { version = "2.5.7", features = ["serde"] }
 
 hopr-bindings = "4.8"
-hopr-types = { version = "1.5", features = [
+hopr-types = { version = "1.6", features = [
   "chain",
   "crypto",
   "internal",
