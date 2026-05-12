@@ -7,7 +7,6 @@
 //! - `safe_module`: create and operate Safe + module setups
 //! - `win_prob`: manage winning probability parameters
 
-pub mod constants;
 pub mod environment_config;
 pub mod faucet;
 pub mod identity;
