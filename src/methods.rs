@@ -13,6 +13,12 @@ use IMulticall3Extract::IMulticall3ExtractInstance;
 use SafeSingleton::{SafeSingletonInstance, execTransactionCall, removeOwnerCall, setupCall};
 use hex_literal::hex;
 use hopr_bindings::{
+    constants::{
+        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, ERC_1967_PROXY_CREATION_CODE,
+        DOMAIN_SEPARATOR_TYPEHASH,
+        SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
+        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
+    },
     exports::alloy::{
         network::{EthereumWallet, TransactionBuilder},
         primitives::{Address, B256, Bytes, U256, keccak256, utils::format_units},
@@ -42,11 +48,6 @@ use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
-    constants::{
-        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
-        ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
-        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
-    },
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
     utils::{HelperErrors, build_default_target, get_create2_address},
 };

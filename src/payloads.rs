@@ -1,6 +1,11 @@
 use std::{ops::Add, str::FromStr};
 
 use hopr_bindings::{
+    constants::{
+        DEFAULT_NODE_PERMISSIONS, DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER,
+        DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, 
+        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
+    },
     exports::alloy::{
         network::TransactionBuilder,
         primitives::{Address, Bytes, U256, aliases::U56},
@@ -21,11 +26,6 @@ use hopr_types::internal::prelude::WinningProbability;
 use tracing::{debug, info};
 
 use crate::{
-    constants::{
-        DEFAULT_NODE_PERMISSIONS, DEPLOYSAFEANDMODULEANDINCLUDENODES_IDENTIFIER, DEPLOYSAFEMODULE_FUNCTION_IDENTIFIER,
-        SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS,
-        SENTINEL_OWNERS,
-    },
     methods::{
         SafeSingleton::removeOwnerCall, predict_safe_address, prepare_safe_tx_multicall_payload_from_owner_contract,
     },
