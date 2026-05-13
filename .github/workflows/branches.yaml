@@ -24,7 +24,7 @@ jobs:
       unit_coverage: true
       unconditional: true
       unit_coverage_command: "nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov"
-      runner: self-hosted-hoprnet-bigger
+      runner: depot-ubuntu-24.04-4
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
