@@ -4,8 +4,14 @@ use std::str::FromStr;
 
 use SafeContract::SafeContractInstance;
 use hopr_bindings::{
+    config::ContractInstances,
     constants::DEFAULT_CAPABILITY_PERMISSIONS,
-    config::ContractInstances, constants::{SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141, SAFE_DEPLOYER_ADDRESS, SAFE_DEPLOYER_BALANCE, SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE, SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE, SAFE_SINGLETON_ADDRESS, SAFE_SINGLETON_DEPLOY_CODE_V141}, exports::alloy::{
+    constants::{
+        SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141, SAFE_DEPLOYER_ADDRESS, SAFE_DEPLOYER_BALANCE,
+        SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE, SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE,
+        SAFE_SINGLETON_ADDRESS, SAFE_SINGLETON_DEPLOY_CODE_V141,
+    },
+    exports::alloy::{
         self,
         contract::{Error as ContractError, Result as ContractResult},
         hex::FromHexError,
@@ -18,7 +24,11 @@ use hopr_bindings::{
         sol,
         sol_types::{SolCall, SolValue},
         transports::TransportErrorKind,
-    }, hopr_channels::HoprChannels::HoprChannelsInstance, hopr_node_management_module::HoprNodeManagementModule, hopr_node_stake_factory::HoprNodeStakeFactory, hopr_token::HoprToken::{self, HoprTokenInstance},
+    },
+    hopr_channels::HoprChannels::HoprChannelsInstance,
+    hopr_node_management_module::HoprNodeManagementModule,
+    hopr_node_stake_factory::HoprNodeStakeFactory,
+    hopr_token::HoprToken::{self, HoprTokenInstance},
 };
 use hopr_crypto_keypair::errors::KeyPairError;
 use hopr_types::{
