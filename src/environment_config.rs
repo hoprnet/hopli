@@ -125,7 +125,7 @@ impl NetworkProviderArgs {
             .disable_recommended_fillers()
             .filler(ChainIdFiller::default())
             .filler(NonceFiller::new(CachedNonceManager::default()))
-            .filler(GasFiller)
+            .filler(GasFiller::default())
             .filler(BlobGasFiller::default())
             .wallet(wallet)
             .connect_client(rpc_client);
@@ -152,7 +152,7 @@ impl NetworkProviderArgs {
             // .wallet(wallet)
             .filler(ChainIdFiller::default())
             .filler(NonceFiller::new(CachedNonceManager::default()))
-            .filler(GasFiller)
+            .filler(GasFiller::default())
             .filler(BlobGasFiller::default())
             .connect_client(rpc_client);
 
@@ -162,12 +162,12 @@ impl NetworkProviderArgs {
 
 #[cfg(test)]
 mod tests {
-    use hopr_bindings::exports::alloy::providers::Provider;
+    use hopr_bindings::{config::ContractInstances, exports::alloy::providers::Provider};
 
     use super::*;
     use crate::{
         methods::create_rpc_client_to_anvil,
-        utils::{ContractInstances, create_anvil_at_port},
+        utils::{a2h, create_anvil_at_port},
     };
 
     #[tokio::test]
@@ -219,11 +219,12 @@ mod tests {
 
         // use the first funded identity of anvil
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let contract_deployer_address = contract_deployer.public().to_address();
 
         // create client
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy local contracts
-        let instances = ContractInstances::deploy_for_testing(client.clone(), &contract_deployer)
+        let instances = ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer_address))
             .await
             .expect("failed to deploy");
 
