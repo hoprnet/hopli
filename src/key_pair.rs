@@ -222,7 +222,8 @@ impl ArgEnvReader<ChainKeypair, String> for PrivateKeyArgs {
 }
 
 /// Deprecated, no-op arg kept so existing scripts passing `--manager-private-key`
-/// or setting `MANAGER_PRIVATE_KEY` keep parsing. The value is never read.
+/// keep parsing without an "unexpected argument" error. A `MANAGER_PRIVATE_KEY`
+/// environment variable is simply ignored. The value is never read.
 #[derive(Debug, Clone, Parser, Default)]
 pub struct ManagerPrivateKeyArgs {
     #[clap(
