@@ -35,6 +35,8 @@
 //!   new one.
 //! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and adds nodes to the new module.
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
+//! - [SafeModuleSubcommands::AddNode] adds an existing node identity to an already-deployed safe and module pair,
+//!   without creating new contracts or deregistering from a previous safe.
 //!
 //! Some sample commands
 //! - Express creation of a safe and a module
@@ -116,6 +118,19 @@
 //!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
 //!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
 //!     --deployment-nonce 123456 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "http://localhost:8545"
+//! ```
+//!
+//! - Add an existing node identity to an existing safe and module
+//! ```text
+//! hopli safe-module add-node \
+//!     --network anvil-localhost \
+//!     --contracts-root "../ethereum/contracts" \
+//!     --identity-from-path "./test/node.id" \
+//!     --password-path "./test/pwd" \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
@@ -448,6 +463,39 @@ pub enum SafeModuleSubcommands {
 
         /// Access to the private key, of which the wallet either contains sufficient assets
         /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Add an existing node identity to an already-deployed safe and module pair
+    #[command(visible_alias = "an")]
+    AddNode {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// safe address that the nodes will be added to
+        #[clap(help = "Safe address that owns the module", long, short = 's')]
+        safe_address: String,
+
+        /// module address that the nodes will be included in
+        #[clap(help = "Module address to which the nodes are added", long, short = 'm')]
+        module_address: String,
+
+        /// Access to the private key of a safe owner
         #[command(flatten)]
         private_key: PrivateKeyArgs,
     },
@@ -978,6 +1026,62 @@ impl SafeModuleSubcommands {
         .await?;
         Ok(())
     }
+
+    /// Execute the command, which adds existing node identities to an already-deployed
+    /// safe and module pair. The signer of `private_key` must be an owner of the safe.
+    pub async fn execute_safe_module_add_node(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        safe_address: String,
+        module_address: String,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        // read all the node addresses
+        let mut node_eth_addresses: Vec<Address> = Vec::new();
+        if let Some(addresses) = node_address {
+            node_eth_addresses.extend(
+                addresses
+                    .split(',')
+                    .map(|addr| {
+                        Address::from_str(addr)
+                            .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        node_eth_addresses.extend(
+            local_identity
+                .to_addresses()
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
+                .into_iter()
+                .map(a2h),
+        );
+
+        if node_eth_addresses.is_empty() {
+            return Err(HelperErrors::InvalidAddress(
+                "no node address provided via --node-address or identity files".into(),
+            ));
+        }
+
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+        let module_addr = Address::from_str(&module_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
+
+        let signer_private_key = private_key.read_default()?;
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+
+        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr, signer_private_key).await?;
+        info!(
+            "Nodes {:?} have been included in module {:?} owned by safe {:?}",
+            node_eth_addresses, module_addr, safe_addr
+        );
+
+        Ok(())
+    }
 }
 
 impl Cmd for SafeModuleSubcommands {
@@ -1118,6 +1222,24 @@ impl Cmd for SafeModuleSubcommands {
             } => {
                 SafeModuleSubcommands::execute_safe_create_add_new_target(
                     network_provider,
+                    safe_address,
+                    module_address,
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::AddNode {
+                network_provider,
+                local_identity,
+                node_address,
+                safe_address,
+                module_address,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_safe_module_add_node(
+                    network_provider,
+                    local_identity,
+                    node_address,
                     safe_address,
                     module_address,
                     private_key,

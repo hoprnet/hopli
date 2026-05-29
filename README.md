@@ -179,6 +179,19 @@ hopli safe-module migrate \
   --private-key <PRIVATE_KEY>
 ```
 
+Add an existing node identity to an already-deployed safe/module pair:
+
+```bash
+hopli safe-module add-node \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --safe-address 0xSafe... \
+  --module-address 0xModule... \
+  --identity-from-path ./identities/node.id \
+  --password-path ./secrets/identity.pwd \
+  --private-key <PRIVATE_KEY>
+```
+
 Move nodes to a new safe/module pair:
 
 ```bash
