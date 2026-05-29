@@ -66,9 +66,8 @@ Supported environment variables:
 - `IDENTITY_PASSWORD`
 - `NEW_IDENTITY_PASSWORD`
 - `PRIVATE_KEY`
-- `MANAGER_PRIVATE_KEY`
 
-Equivalent CLI flags are available (`--password-path`, `--new-password-path`, `--private-key`, `--manager-private-key`).
+Equivalent CLI flags are available (`--password-path`, `--new-password-path`, `--private-key`).
 
 ## Commands
 
@@ -162,8 +161,7 @@ hopli safe-module create \
   --allowance 10 \
   --hopr-amount 10 \
   --native-amount 0.1 \
-  --private-key <PRIVATE_KEY> \
-  --manager-private-key <MANAGER_PRIVATE_KEY>
+  --private-key <PRIVATE_KEY>
 ```
 
 Migrate existing safe/module to another network config:
@@ -202,8 +200,7 @@ hopli safe-module move \
   --new-safe-address 0xNewSafe... \
   --new-module-address 0xNewModule... \
   --node-address 0xNode1...,0xNode2... \
-  --private-key <PRIVATE_KEY> \
-  --manager-private-key <MANAGER_PRIVATE_KEY>
+  --private-key <PRIVATE_KEY>
 ```
 
 ### 4. Winning probability
