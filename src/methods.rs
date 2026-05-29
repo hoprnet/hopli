@@ -67,6 +67,7 @@ sol!(
         function encodeTransactionData(address to, uint256 value, bytes calldata data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) public view returns (bytes memory);
         function getTransactionHash(address to, uint256 value, bytes calldata data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) public view returns (bytes32);
         function isModuleEnabled(address module) public view returns (bool);
+        function getModulesPaginated(address start, uint256 pageSize) public view returns (address[] memory array, address next);
     }
 );
 
@@ -75,6 +76,7 @@ sol!(
     #![sol(rpc)]
     contract ModuleSingleton {
         function isNode(address) external view returns (bool);
+        function isHoprNodeManagementModule() external view returns (bool);
         function getTargets() external view returns (uint256[] memory);
         function owner() public view returns (address);
     }
@@ -1326,6 +1328,114 @@ pub async fn debug_node_safe_module_setup_main<P: Provider>(
         module_owner.eq(safe_address)
     );
     Ok(())
+}
+
+/// Node-safe registry status for a single node found in a HOPR module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SafeNodeStatus {
+    pub address: Address,
+    /// Safe address registered for this node in the node-safe registry.
+    /// `Address::ZERO` means the node has not registered itself yet.
+    pub registered_safe: Address,
+}
+
+/// State of the HOPR node management module attached to a Safe.
+#[derive(Debug, Clone, Default)]
+pub struct HoprModuleInfo {
+    pub address: Address,
+    pub owner: Address,
+    /// All non-node targets scoped on the module, as raw `(address, target_type_byte)` pairs.
+    /// Callers identify which target is channels / announcement / wxHOPR-token by matching
+    /// `address` against known contract addresses in the network config.
+    pub targets: Vec<(Address, u8)>,
+    pub nodes: Vec<SafeNodeStatus>,
+}
+
+/// Report describing a Safe and its (optional) attached HOPR module.
+#[derive(Debug, Clone, Default)]
+pub struct SafeSetupReport {
+    pub owners: Vec<Address>,
+    pub threshold: U256,
+    /// All Safe modules attached to this Safe (any kind, not just HOPR).
+    pub modules: Vec<Address>,
+    pub hopr_module: Option<HoprModuleInfo>,
+}
+
+/// Reads the current state of a Safe and any attached HOPR node management module:
+/// owners, threshold, the list of attached modules, and — for the HOPR module if
+/// present — its on-chain targets, the channels/announcement contracts it scopes,
+/// and each member node's registration in the node-safe registry.
+pub async fn check_safe_setup<P: Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    node_safe_registry: HoprNodeSafeRegistryInstance<Arc<P>>,
+) -> Result<SafeSetupReport, HelperErrors> {
+    let provider = safe.provider();
+    let sentinel = Address::from(hex!("0000000000000000000000000000000000000001"));
+
+    let owners = safe.getOwners().call().await?;
+    let threshold = safe.getThreshold().call().await?;
+
+    // walk paginated modules until the sentinel comes back as `next`
+    let mut modules: Vec<Address> = Vec::new();
+    let mut cursor = sentinel;
+    loop {
+        let page = safe.getModulesPaginated(cursor, U256::from(50u64)).call().await?;
+        modules.extend(page.array.iter().copied());
+        if page.next == sentinel || page.next == Address::ZERO {
+            break;
+        }
+        cursor = page.next;
+    }
+
+    // find a HOPR Node Management Module among the attached modules
+    let mut hopr_module: Option<HoprModuleInfo> = None;
+    for module_addr in &modules {
+        let module = ModuleSingleton::new(*module_addr, provider.clone());
+        let is_hopr = module.isHoprNodeManagementModule().call().await.unwrap_or(false);
+        if !is_hopr {
+            continue;
+        }
+
+        let owner = module.owner().call().await?;
+        let targets = module.getTargets().call().await?;
+
+        let mut info = HoprModuleInfo {
+            address: *module_addr,
+            owner,
+            ..Default::default()
+        };
+        let mut node_addresses: Vec<Address> = Vec::new();
+        for t in targets {
+            let bytes = t.to_be_bytes::<32>();
+            let addr = Address::from_slice(&bytes[0..20]);
+            let target_type = bytes[21];
+            // byte 21 = targetType. 3 = node; everything else (channels/announcement/token/...)
+            // is classified by the caller via address matching against the network config.
+            if target_type == 3 {
+                node_addresses.push(addr);
+            } else {
+                info.targets.push((addr, target_type));
+            }
+        }
+
+        for node in node_addresses {
+            let registered_safe = node_safe_registry.nodeToSafe(node).call().await?;
+            info.nodes.push(SafeNodeStatus {
+                address: node,
+                registered_safe,
+            });
+        }
+
+        hopr_module = Some(info);
+        break;
+    }
+
+    Ok(SafeSetupReport {
+        owners,
+        threshold,
+        modules,
+        hopr_module,
+    })
 }
 
 pub type AnvilRpcClient = FillProvider<

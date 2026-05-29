@@ -177,6 +177,16 @@ hopli safe-module migrate \
   --private-key <PRIVATE_KEY>
 ```
 
+Inspect a safe — owners/threshold, attached modules, linked nodes, and which known network the on-chain setup matches:
+
+```bash
+hopli safe-module check-safe \
+  --provider-url https://gnosis-rpc.example/ \
+  --safe-address 0xSafe...
+```
+
+No `--network` flag is required; check-safe reads the chain id from the RPC and tries to match the module's targets against every known network configuration.
+
 Add an existing node identity to an already-deployed safe/module pair:
 
 ```bash

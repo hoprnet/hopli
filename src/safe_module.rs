@@ -32,6 +32,9 @@
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
 //! - [SafeModuleSubcommands::AddNode] adds an existing node identity to an already-deployed safe and module pair,
 //!   without creating new contracts or deregistering from a previous safe.
+//! - [SafeModuleSubcommands::CheckSafe] inspects a Safe address and reports its setup: owners, threshold, attached
+//!   modules, the HOPR module's targets (channels/announcement), the linked nodes and their node-safe registry status,
+//!   and which known HOPR network configuration matches the on-chain state.
 //!
 //! Some sample commands
 //! - Express creation of a safe and a module
@@ -117,6 +120,13 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //!
+//! - Inspect a safe and report its setup, which network it matches, and linked nodes
+//! ```text
+//! hopli safe-module check-safe \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --provider-url "https://gnosis-rpc.example/"
+//! ```
+//!
 //! - Add an existing node identity to an existing safe and module
 //! ```text
 //! hopli safe-module add-node \
@@ -144,7 +154,10 @@ use std::str::FromStr;
 
 use clap::{Parser, builder::RangedU64ValueParser};
 use hopr_bindings::{
-    exports::alloy::primitives::{Address, U256, utils::parse_units},
+    exports::alloy::{
+        primitives::{Address, U256, utils::parse_units},
+        providers::Provider,
+    },
     hopr_node_safe_registry::HoprNodeSafeRegistry,
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
@@ -153,10 +166,10 @@ use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{
-    environment_config::NetworkProviderArgs,
+    environment_config::{NetworkProviderArgs, build_provider_without_signer, load_all_networks},
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
-        SafeSingleton, add_new_network_target_to_module, create_new_module_and_include_nodes,
+        SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
         create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
         debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
         deregister_nodes_from_node_safe_registry_and_remove_from_module, include_nodes_to_module, migrate_nodes,
@@ -460,6 +473,28 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
+    },
+
+    /// Inspect a Safe and report its setup, attached HOPR module, linked nodes,
+    /// and which known network configuration matches the on-chain state.
+    #[command(visible_alias = "cs")]
+    CheckSafe {
+        /// Customized RPC provider endpoint
+        #[clap(help = "Blockchain RPC provider endpoint.", long, short = 'r')]
+        provider_url: String,
+
+        /// Optional path to a `contracts-addresses.json` (defaults to embedded config)
+        #[clap(
+            env = "HOPLI_CONTRACTS_ROOT",
+            help = "Specify path pointing to the contracts root (optional, defaults to embedded config)",
+            long,
+            short = 'c'
+        )]
+        contracts_root: Option<String>,
+
+        /// safe address to inspect
+        #[clap(help = "Safe address to inspect", long, short = 's')]
+        safe_address: String,
     },
 
     /// Add an existing node identity to an already-deployed safe and module pair
@@ -1022,6 +1057,139 @@ impl SafeModuleSubcommands {
         Ok(())
     }
 
+    /// Execute the command which inspects a Safe and reports its setup,
+    /// attached HOPR module, linked nodes, and the matching network configuration.
+    pub async fn execute_safe_module_check_safe(
+        provider_url: String,
+        contracts_root: Option<String>,
+        safe_address: String,
+    ) -> Result<(), HelperErrors> {
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+
+        let rpc_provider = build_provider_without_signer(&provider_url).await?;
+        let chain_id = rpc_provider
+            .get_chain_id()
+            .await
+            .map_err(|e| HelperErrors::MiddlewareError(e.to_string()))?;
+        let all_networks = load_all_networks(contracts_root.as_deref())?;
+
+        // narrow candidate networks to those matching the connected chain id
+        let candidates: Vec<_> = all_networks
+            .iter()
+            .filter(|(_, n)| n.chain_id == chain_id)
+            .collect();
+
+        // we still need a node-safe registry contract address to query per-node registration.
+        // pick one from the candidates (they all share the same registry on a given chain).
+        let registry_address = candidates
+            .first()
+            .map(|(_, n)| n.addresses.node_safe_registry)
+            .ok_or(HelperErrors::UnknownNetwork)?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+        let node_safe_registry = HoprNodeSafeRegistry::new(registry_address, rpc_provider.clone());
+
+        let report = check_safe_setup(safe, node_safe_registry).await?;
+
+        info!("Safe {:?}", safe_addr);
+        info!("  threshold {}/{}", report.threshold, report.owners.len());
+        for o in &report.owners {
+            info!("  owner: {:?}", o);
+        }
+        info!("Attached modules ({}):", report.modules.len());
+        for m in &report.modules {
+            info!("  - {:?}", m);
+        }
+
+        match &report.hopr_module {
+            None => {
+                warn!("No HOPR Node Management Module found among the Safe's modules");
+            }
+            Some(m) => {
+                info!("HOPR Node Management Module:");
+                info!("  address: {:?}", m.address);
+                info!("  owner:   {:?} (matches safe: {})", m.owner, m.owner == safe_addr);
+
+                // Classify each non-node target by matching its address against known
+                // contract addresses in candidate networks. The encoded target_type byte
+                // alone can't distinguish announcement from wxHOPR-token (both 0x00).
+                let mut found_channels: Option<(Address, Vec<&str>)> = None;
+                let mut found_announcement: Option<(Address, Vec<&str>)> = None;
+                let mut found_token: Option<(Address, Vec<&str>)> = None;
+                let mut unknowns: Vec<(Address, u8)> = Vec::new();
+
+                for (addr, ty) in &m.targets {
+                    let ch: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.channels == *addr).then_some(n.as_str()))
+                        .collect();
+                    let ann: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.announcements == *addr).then_some(n.as_str()))
+                        .collect();
+                    let tok: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.token == *addr).then_some(n.as_str()))
+                        .collect();
+
+                    if !ch.is_empty() {
+                        found_channels = Some((*addr, ch));
+                    } else if !ann.is_empty() {
+                        found_announcement = Some((*addr, ann));
+                    } else if !tok.is_empty() {
+                        found_token = Some((*addr, tok));
+                    } else {
+                        unknowns.push((*addr, *ty));
+                    }
+                }
+
+                // headline: which network this module is configured for (channels is the key)
+                match &found_channels {
+                    None => warn!("  network: unknown (no recognised channels target on module)"),
+                    Some((a, nets)) => info!("  network: {} (channels target {:?})", nets.join(", "), a),
+                }
+
+                // announcement target health (silent if it matches the same network as channels)
+                let channels_nets = found_channels.as_ref().map(|(_, n)| n.as_slice());
+                match (&found_announcement, channels_nets) {
+                    (None, _) => warn!(
+                        "  announcement target not set — run `safe-module migrate` to finish initialisation"
+                    ),
+                    (Some((_, ann)), Some(ch)) if ann.as_slice() == ch => {}
+                    (Some((a, ann)), _) => warn!(
+                        "  announcement target {:?} points to a DIFFERENT network ({}) than channels",
+                        a,
+                        ann.join(", ")
+                    ),
+                }
+
+                if let Some((a, _)) = &found_token {
+                    info!("  wxHOPR token target scoped: {:?}", a);
+                }
+                for (a, ty) in &unknowns {
+                    warn!("  unrecognised target {:?} (target_type byte {:#04x})", a, ty);
+                }
+
+                info!("Nodes included in module ({}):", m.nodes.len());
+                for n in &m.nodes {
+                    if n.registered_safe == Address::ZERO {
+                        info!("  - {:?} — node-safe registry: not registered", n.address);
+                    } else if n.registered_safe == safe_addr {
+                        info!("  - {:?} — node-safe registry: registered to this safe", n.address);
+                    } else {
+                        warn!(
+                            "  - {:?} — node-safe registry: registered to a DIFFERENT safe {:?}",
+                            n.address, n.registered_safe
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Execute the command, which adds existing node identities to an already-deployed
     /// safe and module pair. The signer of `private_key` must be an owner of the safe.
     pub async fn execute_safe_module_add_node(
@@ -1222,6 +1390,13 @@ impl Cmd for SafeModuleSubcommands {
                     private_key,
                 )
                 .await
+            }
+            SafeModuleSubcommands::CheckSafe {
+                provider_url,
+                contracts_root,
+                safe_address,
+            } => {
+                SafeModuleSubcommands::execute_safe_module_check_safe(provider_url, contracts_root, safe_address).await
             }
             SafeModuleSubcommands::AddNode {
                 network_provider,
