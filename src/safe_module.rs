@@ -5,21 +5,16 @@
 //!     - create a Safe proxy instance and HOPR node management module proxy instance
 //!     - include nodes configure default permissions on the created module proxy
 //!     - fund the node and Safe with some native tokens and HOPR tokens respectively
-//!     - approve HOPR tokens to be transferred from the Safe proxy instaces by Channels contract
-//!     - Use manager wallet to add nodes and staking safes to the Network Registry contract
 //! - [SafeModuleSubcommands::Move] moves a node from to an existing Safe. Note that the Safe should has a node
 //!   management module attached and configured. Note that the admin key of the old and new safes are the same. This
 //!   command does not support moving nodes to safes controled by a different admin key. Note that all the safes
 //!   involved (old and new) should have a threshold of 1 Detailed breakdown of the steps:
 //!     - use old safes to deregister nodes from Node-safe registry
 //!     - use the new safe to include nodes to the module
-//!     - use manager wallet to deregister nodes from the network registry
-//!     - use manager wallet to register nodes with new safes to the network regsitry
 //! - [SafeModuleSubcommands::Migrate] migrates a node to a different network. It performs the following steps:
 //!     - add the Channel contract of the new network to the module as target and set default permissions.
 //!     - add the Announcement contract as target to the module
 //!     - approve HOPR tokens of the Safe proxy to be transferred by the new Channels contract
-//!     - Use the manager wallet to add nodes and Safes to the Network Registry contract of the new network.
 //! - [SafeModuleSubcommands::Debug] goes through a series of checks to debug the setup of a node and safe. It checks
 //!   the following items. The INFO level of the tracing logger MUST be enabled to see the output of the debug command.
 //!     - node xDAI balance
@@ -244,8 +239,8 @@ pub enum SafeModuleSubcommands {
         #[command(flatten)]
         private_key: PrivateKeyArgs,
 
-        /// Access to the private key, of which the wallet has `MANAGER_ROLE` of network registry
-        /// If provided, this wallet will grant the created safe access to the network registry
+        /// Accepted for backwards compatibility. Currently unused — network-registry
+        /// registration is no longer performed by this command.
         #[command(flatten, name = "manager_private_key")]
         manager_private_key: ManagerPrivateKeyArgs,
     },
@@ -330,8 +325,8 @@ pub enum SafeModuleSubcommands {
         #[command(flatten)]
         private_key: PrivateKeyArgs,
 
-        /// Access to the private key, of which the wallet has `MANAGER_ROLE` of network registry
-        /// If provided, this wallet will grant the created safe access to the network registry
+        /// Accepted for backwards compatibility. Currently unused — network-registry
+        /// registration is no longer performed by this command.
         #[command(flatten, name = "manager_private_key")]
         manager_private_key: ManagerPrivateKeyArgs,
     },
