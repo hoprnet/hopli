@@ -95,7 +95,7 @@ pub fn load_all_networks(
 
 /// Build a no-signer RPC provider from a URL.
 pub async fn build_provider_without_signer(provider_url: &str) -> Result<Arc<RpcProviderWithoutSigner>, HelperErrors> {
-    let parsed_url = url::Url::parse(provider_url).unwrap();
+    let parsed_url = url::Url::parse(provider_url).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
     let transport_client = ReqwestTransport::new(parsed_url);
     let rpc_client = ClientBuilder::default().transport(transport_client.clone(), transport_client.guess_local());
 
@@ -126,7 +126,8 @@ impl NetworkProviderArgs {
     /// get the provider object
     pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors> {
         // Build transport
-        let parsed_url = url::Url::parse(self.provider_url.as_str()).unwrap();
+        let parsed_url =
+            url::Url::parse(self.provider_url.as_str()).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
         let transport_client = ReqwestTransport::new(parsed_url);
 
         // Build JSON RPC client
