@@ -76,29 +76,48 @@ impl Default for NetworkProviderArgs {
     }
 }
 
+/// Load every known network (contract addresses + chain id), from a local
+/// `contracts-addresses.json` if `contracts_root` is provided, otherwise from
+/// the embedded `hopr-bindings` configuration.
+pub fn load_all_networks(
+    contracts_root: Option<&str>,
+) -> Result<BTreeMap<String, SingleNetworkContractAddresses>, HelperErrors> {
+    if let Some(contract_root) = contracts_root {
+        let contract_environment_config_path = PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
+        let file_read =
+            std::fs::read_to_string(contract_environment_config_path).map_err(HelperErrors::UnableToReadFromPath)?;
+        let cfg: NetworkConfig = serde_json::from_str(&file_read).map_err(HelperErrors::SerdeJson)?;
+        Ok(cfg.networks)
+    } else {
+        Ok(hopr_bindings::config::NetworksWithContractAddresses::default().networks)
+    }
+}
+
+/// Build a no-signer RPC provider from a URL.
+pub async fn build_provider_without_signer(provider_url: &str) -> Result<Arc<RpcProviderWithoutSigner>, HelperErrors> {
+    let parsed_url = url::Url::parse(provider_url).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
+    let transport_client = ReqwestTransport::new(parsed_url);
+    let rpc_client = ClientBuilder::default().transport(transport_client.clone(), transport_client.guess_local());
+
+    if rpc_client.is_local() {
+        rpc_client.set_poll_interval(std::time::Duration::from_millis(10));
+    };
+
+    let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .filler(ChainIdFiller::default())
+        .filler(NonceFiller::new(CachedNonceManager::default()))
+        .filler(GasFiller::default())
+        .filler(BlobGasFiller::default())
+        .connect_client(rpc_client);
+
+    Ok(Arc::new(provider))
+}
+
 impl NetworkProviderArgs {
     /// Get the network details (contract addresses, chain id) from network names
     pub fn get_network_details_from_name(&self) -> Result<SingleNetworkContractAddresses, HelperErrors> {
-        // If contracts_root is provided, read from the local file
-        // Otherwise, use the embedded configuration from hopr_bindings
-        let network_config = if let Some(contract_root) = &self.contracts_root {
-            let contract_environment_config_path =
-                PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
-
-            let file_read = std::fs::read_to_string(contract_environment_config_path)
-                .map_err(HelperErrors::UnableToReadFromPath)?;
-
-            serde_json::from_str::<NetworkConfig>(&file_read).map_err(HelperErrors::SerdeJson)?
-        } else {
-            // Use embedded configuration from hopr_bindings
-            let networks_with_addresses = hopr_bindings::config::NetworksWithContractAddresses::default();
-            NetworkConfig {
-                networks: networks_with_addresses.networks,
-            }
-        };
-
-        network_config
-            .networks
+        load_all_networks(self.contracts_root.as_deref())?
             .get(&self.network)
             .cloned()
             .ok_or_else(|| HelperErrors::UnknownNetwork)
@@ -107,7 +126,8 @@ impl NetworkProviderArgs {
     /// get the provider object
     pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors> {
         // Build transport
-        let parsed_url = url::Url::parse(self.provider_url.as_str()).unwrap();
+        let parsed_url =
+            url::Url::parse(self.provider_url.as_str()).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
         let transport_client = ReqwestTransport::new(parsed_url);
 
         // Build JSON RPC client
@@ -135,28 +155,7 @@ impl NetworkProviderArgs {
 
     /// get the provider object without signer
     pub async fn get_provider_without_signer(&self) -> Result<Arc<RpcProviderWithoutSigner>, HelperErrors> {
-        // Build transport
-        let parsed_url = url::Url::parse(self.provider_url.as_str()).unwrap();
-        let transport_client = ReqwestTransport::new(parsed_url);
-
-        // Build JSON RPC client
-        let rpc_client = ClientBuilder::default().transport(transport_client.clone(), transport_client.guess_local());
-
-        if rpc_client.is_local() {
-            rpc_client.set_poll_interval(std::time::Duration::from_millis(10));
-        };
-
-        // Build default JSON RPC provider
-        let provider = ProviderBuilder::new()
-            .disable_recommended_fillers()
-            // .wallet(wallet)
-            .filler(ChainIdFiller::default())
-            .filler(NonceFiller::new(CachedNonceManager::default()))
-            .filler(GasFiller::default())
-            .filler(BlobGasFiller::default())
-            .connect_client(rpc_client);
-
-        Ok(Arc::new(provider))
+        build_provider_without_signer(&self.provider_url).await
     }
 }
 
