@@ -1335,8 +1335,10 @@ pub async fn debug_node_safe_module_setup_main<P: Provider>(
 pub struct SafeNodeStatus {
     pub address: Address,
     /// Safe address registered for this node in the node-safe registry.
-    /// `Address::ZERO` means the node has not registered itself yet.
-    pub registered_safe: Address,
+    /// `None` means the lookup was not performed (the module's network — and hence which
+    /// node-safe registry to query — could not be identified). `Some(Address::ZERO)` means
+    /// the lookup ran and the node has not registered itself yet.
+    pub registered_safe: Option<Address>,
 }
 
 /// State of the HOPR node management module attached to a Safe.
@@ -1363,11 +1365,13 @@ pub struct SafeSetupReport {
 
 /// Reads the current state of a Safe and any attached HOPR node management module:
 /// owners, threshold, the list of attached modules, and — for the HOPR module if
-/// present — its on-chain targets, the channels/announcement contracts it scopes,
-/// and each member node's registration in the node-safe registry.
+/// present — its on-chain targets and member nodes.
+///
+/// Each member node's `registered_safe` is left as `None`; resolving it requires the
+/// network-specific node-safe registry, which the caller selects after identifying the
+/// module's network from its channels target (see [`fill_node_registry_status`]).
 pub async fn check_safe_setup<P: Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
-    node_safe_registry: HoprNodeSafeRegistryInstance<Arc<P>>,
 ) -> Result<SafeSetupReport, HelperErrors> {
     let provider = safe.provider();
     let sentinel = Address::from(hex!("0000000000000000000000000000000000000001"));
@@ -1404,26 +1408,23 @@ pub async fn check_safe_setup<P: Provider>(
             owner,
             ..Default::default()
         };
-        let mut node_addresses: Vec<Address> = Vec::new();
         for t in targets {
             let bytes = t.to_be_bytes::<32>();
             let addr = Address::from_slice(&bytes[0..20]);
+            // byte 21 = TargetType (TOKEN=0, CHANNELS=1, SEND=2). `includeNode` scopes a node
+            // as a SEND target (the input's 0x03 byte is overwritten to SEND by
+            // `forceWriteAsTargetType`), so a SEND target is a node candidate. Confirm against the
+            // module's membership set (`isNode`) before treating it as a node; every other target
+            // (channels/announcement/token/...) is classified by the caller via address matching.
             let target_type = bytes[21];
-            // byte 21 = targetType. 3 = node; everything else (channels/announcement/token/...)
-            // is classified by the caller via address matching against the network config.
-            if target_type == 3 {
-                node_addresses.push(addr);
+            if target_type == 2 && module.isNode(addr).call().await.unwrap_or(false) {
+                info.nodes.push(SafeNodeStatus {
+                    address: addr,
+                    registered_safe: None,
+                });
             } else {
                 info.targets.push((addr, target_type));
             }
-        }
-
-        for node in node_addresses {
-            let registered_safe = node_safe_registry.nodeToSafe(node).call().await?;
-            info.nodes.push(SafeNodeStatus {
-                address: node,
-                registered_safe,
-            });
         }
 
         hopr_module = Some(info);
@@ -1436,6 +1437,20 @@ pub async fn check_safe_setup<P: Provider>(
         modules,
         hopr_module,
     })
+}
+
+/// Resolves each node's `registered_safe` by querying the given node-safe registry.
+///
+/// The registry is network-specific, so the caller must pass the one belonging to the module's
+/// identified network — several HOPR networks share a chain id but use different registries.
+pub async fn fill_node_registry_status<P: Provider>(
+    node_safe_registry: HoprNodeSafeRegistryInstance<Arc<P>>,
+    nodes: &mut [SafeNodeStatus],
+) -> Result<(), HelperErrors> {
+    for node in nodes.iter_mut() {
+        node.registered_safe = Some(node_safe_registry.nodeToSafe(node.address).call().await?);
+    }
+    Ok(())
 }
 
 pub type AnvilRpcClient = FillProvider<

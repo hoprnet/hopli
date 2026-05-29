@@ -172,6 +172,7 @@ use crate::{
         SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
         create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
         debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
+        fill_node_registry_status,
         deregister_nodes_from_node_safe_registry_and_remove_from_module, include_nodes_to_module, migrate_nodes,
         transfer_native_tokens, transfer_or_mint_tokens,
     },
@@ -1080,17 +1081,25 @@ impl SafeModuleSubcommands {
             .filter(|(_, n)| n.chain_id == chain_id)
             .collect();
 
-        // we still need a node-safe registry contract address to query per-node registration.
-        // pick one from the candidates (they all share the same registry on a given chain).
-        let registry_address = candidates
-            .first()
-            .map(|(_, n)| n.addresses.node_safe_registry)
-            .ok_or(HelperErrors::UnknownNetwork)?;
-
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
-        let node_safe_registry = HoprNodeSafeRegistry::new(registry_address, rpc_provider.clone());
+        let mut report = check_safe_setup(safe).await?;
 
-        let report = check_safe_setup(safe, node_safe_registry).await?;
+        // Resolve node-safe registrations against the registry of the network this module is
+        // actually configured for, identified by its channels target. Several HOPR networks
+        // share a chain id but use different registries, so we must NOT just pick the first
+        // candidate — that would query the wrong registry and report false "not registered".
+        if let Some(m) = report.hopr_module.as_mut() {
+            let registry_address = m.targets.iter().find_map(|(addr, _)| {
+                candidates
+                    .iter()
+                    .find(|(_, c)| c.addresses.channels == *addr)
+                    .map(|(_, c)| c.addresses.node_safe_registry)
+            });
+            if let Some(registry_address) = registry_address {
+                let registry = HoprNodeSafeRegistry::new(registry_address, rpc_provider.clone());
+                fill_node_registry_status(registry, &mut m.nodes).await?;
+            }
+        }
 
         info!("Safe {:?}", safe_addr);
         info!("  threshold {}/{}", report.threshold, report.owners.len());
@@ -1173,15 +1182,21 @@ impl SafeModuleSubcommands {
 
                 info!("Nodes included in module ({}):", m.nodes.len());
                 for n in &m.nodes {
-                    if n.registered_safe == Address::ZERO {
-                        info!("  - {:?} — node-safe registry: not registered", n.address);
-                    } else if n.registered_safe == safe_addr {
-                        info!("  - {:?} — node-safe registry: registered to this safe", n.address);
-                    } else {
-                        warn!(
+                    match n.registered_safe {
+                        None => info!(
+                            "  - {:?} — node-safe registry: not checked (module network unknown)",
+                            n.address
+                        ),
+                        Some(s) if s == Address::ZERO => {
+                            info!("  - {:?} — node-safe registry: not registered", n.address)
+                        }
+                        Some(s) if s == safe_addr => {
+                            info!("  - {:?} — node-safe registry: registered to this safe", n.address)
+                        }
+                        Some(s) => warn!(
                             "  - {:?} — node-safe registry: registered to a DIFFERENT safe {:?}",
-                            n.address, n.registered_safe
-                        );
+                            n.address, s
+                        ),
                     }
                 }
             }
