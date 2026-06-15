@@ -184,6 +184,16 @@
                 files = "";
                 language = "system";
               };
+              renovate-config-validator = {
+                enable = true;
+                name = "Renovate config validator";
+                entry = "${pkgs.writeShellScript "validate-renovate" ''
+                  ${pkgs.nodejs}/bin/npx --yes --package renovate -- renovate-config-validator "$@"
+                ''}";
+                files = "renovate\\.json$";
+                language = "system";
+                pass_filenames = true;
+              };
             };
             tools = pkgs;
             excludes = [ ".gcloudignore" ];
