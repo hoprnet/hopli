@@ -128,7 +128,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
           persist-credentials: false
       - name: Setup Nix
-        uses: hoprnet/hopr-workflows/actions/setup-nix@setup-nix-v1
+        uses: hoprnet/hopr-workflows/actions/setup-nix@c8d45034bb33307dfda3b4dfcd1fc4000cadc05a # setup-nix-v1
         with:
           cachix_cache_name: hopli
           cachix_auth_token: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -156,7 +156,7 @@ jobs:
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
             required_label: binary:aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@build-binaries-v2
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b063eebe2dfb2f92e7177a8f81383aaac4835d09 # build-binaries-v2
     permissions:
       contents: read
     with:
@@ -176,7 +176,7 @@ jobs:
   build-docker:
     name: Docker
     needs: build-binaries
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@build-docker-v2
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@ee9431603e779237f40478d2776b9f701977fe80 # build-docker-v2
     permissions:
       contents: read
       pull-requests: write
