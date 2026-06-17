@@ -217,6 +217,7 @@
             treefmtWrapper = config.treefmt.build.wrapper;
             treefmtPrograms = pkgs.lib.attrValues config.treefmt.build.programs;
             extraPackages = with pkgs; [
+              gh
               git
               cargo-machete
               foundry-bin
@@ -225,8 +226,8 @@
               just
             ];
             shellHook = ''
-              ${pre-commit-check.shellHook}
               export GITHUB_TOKEN="''${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}"
+              ${pre-commit-check.shellHook}
             '';
           };
 
