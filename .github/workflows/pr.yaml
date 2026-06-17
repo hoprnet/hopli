@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # zizmor: ignore[excessive-permissions]
 
 concurrency:
   group: ${{ github.event.pull_request.head.ref || github.ref_name }}-pr
@@ -26,7 +27,7 @@ jobs:
     permissions:
       pull-requests: read
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -90,7 +91,7 @@ jobs:
 
   tests:
     name: Test
-    uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@69d61153fe24338ea983dd657496f0bc8b4cd819 # workflow-tests-v5
+    uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       enable_unit_tests: true
@@ -103,7 +104,6 @@ jobs:
       test_timeout: 60
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      codecov_token: ${{ secrets.CODECOV_TOKEN }}
 
   build-candidate-binaries:
     name: Build Candidate Binaries
@@ -156,9 +156,10 @@ jobs:
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
             required_label: binary:aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b063eebe2dfb2f92e7177a8f81383aaac4835d09 # build-binaries-v2
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
+      id-token: write
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: commit
@@ -169,14 +170,13 @@ jobs:
       timeout_minutes: 120
       enabled: ${{ matrix.required_label == '' || contains(github.event.pull_request.labels.*.name, matrix.required_label) }}
     secrets:
-      gcp_service_account: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
 
   build-docker:
     name: Docker
     needs: build-binaries
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@ee9431603e779237f40478d2776b9f701977fe80 # build-docker-v2
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
       pull-requests: write
@@ -196,7 +196,4 @@ jobs:
       docker_image_format: skopeo
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
     secrets:
-      gcp_service_account: ${{ secrets.GCP_SA_GITHUB_RUNNER }}
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      docker_hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
-      docker_hub_token: ${{ secrets.DOCKER_HUB_TOKEN }}
