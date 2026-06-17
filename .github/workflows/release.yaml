@@ -33,7 +33,7 @@ jobs:
           - architecture: aarch64-darwin
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@fa71078959cf9f892185e8df16551720693a2cd1
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
       id-token: write
@@ -51,7 +51,7 @@ jobs:
   build-docker:
     name: Docker
     needs: build-binaries
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
       pull-requests: write
@@ -89,7 +89,7 @@ jobs:
       id-token: write
     steps:
       - name: Release version
-        uses: hoprnet/hopr-workflows/actions/release-version@fa71078959cf9f892185e8df16551720693a2cd1
+        uses: hoprnet/hopr-workflows/actions/release-version@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
         with:
           source_branch: ${{ github.ref_name }}
           release_type: ${{ inputs.release_type }}
