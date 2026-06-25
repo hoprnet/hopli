@@ -332,61 +332,23 @@
           };
         in
         {
-          treefmt = {
-            inherit (config.flake-root) projectRootFile;
-
-            settings.global.excludes = [
-              "**/*.id"
-              "**/.cargo-ok"
-              "**/.gitignore"
-              ".actrc"
-              ".dockerignore"
-              ".editorconfig"
-              ".gcloudignore"
-              ".gitattributes"
-              ".yamlfmt"
-              "LICENSE"
-              "Makefile"
+          nix-lib.treefmt = {
+            globalExcludes = [
               "justfile"
               "deploy/nfpm/nfpm.yaml"
               ".github/workflows/build-binaries.yaml"
               "docs/*"
               "nix/setup-hook-darwin.sh"
-              "target/*"
             ];
-
-            programs.shfmt.enable = true;
-            settings.formatter.shfmt.includes = [ "*.sh" ];
-
-            programs.yamlfmt.enable = true;
-            settings.formatter.yamlfmt.includes = [
-              ".github/labeler.yml"
-              ".github/workflows/*.yaml"
-            ];
-            # trying setting from https://github.com/google/yamlfmt/blob/main/docs/config-file.md
-            settings.formatter.yamlfmt.settings = {
-              formatter.type = "basic";
-              formatter.max_line_length = 120;
-              formatter.trim_trailing_whitespace = true;
-              formatter.scan_folded_as_literal = true;
-              formatter.include_document_start = true;
+            extraFormatters = {
+              programs.nixfmt.package = pkgs.nixfmt;
+              programs.prettier.package = pkgs.prettier;
+              settings.formatter.shfmt.includes = [ "*.sh" ];
+              settings.formatter.yamlfmt.includes = [
+                ".github/labeler.yml"
+                ".github/workflows/*.yaml"
+              ];
             };
-
-            programs.prettier.enable = true;
-            settings.formatter.prettier.includes = [
-              "*.md"
-              "*.json"
-            ];
-            settings.formatter.prettier.excludes = [
-              "*.yml"
-              "*.yaml"
-            ];
-            programs.rustfmt.enable = true;
-            # using the official Nixpkgs formatting
-            # see https://github.com/NixOS/rfcs/blob/master/rfcs/0166-nix-formatting.md
-            programs.nixfmt.enable = true;
-            programs.taplo.enable = true;
-            programs.ruff-format.enable = true;
           };
 
           checks = { inherit (hopliPackages) hopli-clippy; };

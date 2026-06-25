@@ -1,3 +1,4 @@
+---
 name: Close release
 on:
   workflow_dispatch:
@@ -61,7 +62,6 @@ jobs:
       version_type: release
       build_matrix: >-
         [
-
           {
             "runner": "depot-ubuntu-24.04-4",
             "architecture": "x86_64-linux",
