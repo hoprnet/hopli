@@ -74,7 +74,7 @@ jobs:
           fi
   checks:
     name: Check
-    uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@bbd22e57cf954c15f0a6051d59329857809141dd # workflow-checks-v1
+    uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@d0cffaf9e9209c8eca00e8c74e82ac3f5f3cf7bb # workflow-checks-v2
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       runner_small: depot-ubuntu-24.04
@@ -120,7 +120,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
           persist-credentials: false
       - name: Setup Nix
-        uses: hoprnet/hopr-workflows/actions/setup-nix@c8d45034bb33307dfda3b4dfcd1fc4000cadc05a # setup-nix-v1
+        uses: hoprnet/hopr-workflows/actions/setup-nix@5477bd53d62ac15c4804b31fbd55966b29a43997 # setup-nix-v2
         with:
           cachix_cache_name: hopli
           cachix_auth_token: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -147,7 +147,7 @@ jobs:
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
             required_label: binary:aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b4ee9597f2c47f62fbc2c989a4af36fc4abf2f6f # build-binaries-v3
     permissions:
       contents: read
       id-token: write
