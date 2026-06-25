@@ -1434,3 +1434,215 @@ impl Cmd for SafeModuleSubcommands {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use hopr_bindings::config::{ContractInstances, NetworksWithContractAddresses, SingleNetworkContractAddresses};
+    use hopr_types::crypto::keypairs::ChainKeypair;
+
+    use super::*;
+    use crate::{
+        key_pair::PasswordArgs,
+        methods::create_rpc_client_to_anvil,
+        utils::create_anvil,
+    };
+
+    /// `IdentityFileArgs` with no identity sources — node addresses come from `--node-address`.
+    fn empty_identity() -> IdentityFileArgs {
+        IdentityFileArgs {
+            identity_from_directory: None,
+            identity_from_path: None,
+            password: PasswordArgs::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+
+        // capture the deployed contract addresses before the stake factory is moved into the deploy call
+        let channels_addr = *instances.channels.address();
+        let contract_addresses = instances.get_contract_addresses();
+
+        // deploy a safe + module with the deployer as owner and as the single node
+        let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            channels_addr,
+            vec![deployer_addr],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // register the node to the safe so the node-safe registry branch is exercised
+        instances
+            .safe_registry
+            .registerSafeByNode(*safe.address())
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        // write a contracts-addresses.json describing the local network so the command can
+        // match the on-chain channels target to a known network and its node-safe registry
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let contracts_root = temp_dir.path().to_str().unwrap().to_string();
+        let mut networks = BTreeMap::new();
+        networks.insert(
+            "anvil-localhost".to_string(),
+            SingleNetworkContractAddresses {
+                chain_id: anvil.chain_id(),
+                indexer_start_block_number: 0u32,
+                addresses: contract_addresses,
+            },
+        );
+        let config = NetworksWithContractAddresses { networks };
+        std::fs::write(
+            temp_dir.path().join("contracts-addresses.json"),
+            serde_json::to_string_pretty(&config)?,
+        )?;
+
+        // the command inspects the safe and logs its report; it should succeed
+        SafeModuleSubcommands::execute_safe_module_check_safe(
+            anvil.endpoint(),
+            Some(contracts_root),
+            safe.address().to_string(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe_invalid_address() {
+        let err = SafeModuleSubcommands::execute_safe_module_check_safe(
+            "http://127.0.0.1:8545".to_string(),
+            None,
+            "not-an-address".to_string(),
+        )
+        .await
+        .expect_err("invalid safe address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let node_addresses: Vec<Address> = vec![Address::from([0x11u8; 20]), Address::from([0x22u8; 20])];
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+
+        // deploy a safe + module owned by the deployer, with no nodes yet
+        let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            vec![],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // none of the nodes are included yet
+        for node in &node_addresses {
+            assert!(
+                !node_module.isNode(*node).call().await?,
+                "node should not be included yet"
+            );
+        }
+
+        // the deployer (the safe owner) adds the nodes via the command, passed as --node-address
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            &anvil.endpoint(),
+        ])?;
+        let private_key = PrivateKeyArgs {
+            private_key: Some(hex::encode(contract_deployer.secret().as_ref())),
+        };
+        let node_csv = node_addresses
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            Some(node_csv),
+            safe.address().to_string(),
+            node_module.address().to_string(),
+            private_key,
+        )
+        .await?;
+
+        // the nodes are now included in the module
+        for node in &node_addresses {
+            assert!(
+                node_module.isNode(*node).call().await?,
+                "node should be included after add-node"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node_requires_a_node() {
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            "http://127.0.0.1:8545",
+        ])
+        .expect("args should parse");
+
+        // no node address and no identity files -> nothing to add
+        let err = SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            None,
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "0x0000000000000000000000000000000000000002".to_string(),
+            PrivateKeyArgs::default(),
+        )
+        .await
+        .expect_err("missing node address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+}

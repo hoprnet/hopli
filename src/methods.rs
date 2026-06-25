@@ -2394,4 +2394,139 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_check_safe_setup_reports_module_and_nodes() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut node_addresses: Vec<Address> = Vec::new();
+        for _ in 0..2 {
+            node_addresses.push(get_random_address_for_testing());
+        }
+
+        // launch local anvil instance and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let admin_vec: Vec<Address> = vec![a2h(contract_deployer.public().to_address())];
+
+        // deploy a safe + module, scoping the channels target and including two nodes
+        let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            node_addresses.clone(),
+            admin_vec.clone(),
+            U256::from(1),
+        )
+        .await?;
+
+        let report = check_safe_setup(safe.clone()).await?;
+
+        // owners and threshold reflect the safe configuration
+        assert_eq!(report.owners, admin_vec, "owners mismatch");
+        assert_eq!(report.threshold, U256::from(1), "threshold mismatch");
+
+        // the module is attached to the safe and detected as a HOPR module
+        assert!(
+            report.modules.contains(node_module.address()),
+            "module not listed among attached modules"
+        );
+        let hopr_module = report.hopr_module.expect("HOPR module should be detected");
+        assert_eq!(&hopr_module.address, node_module.address(), "module address mismatch");
+        assert_eq!(hopr_module.owner, *safe.address(), "module owner should be the safe");
+
+        // both included nodes are reported, with registry status still unresolved
+        let mut reported_nodes: Vec<Address> = hopr_module.nodes.iter().map(|n| n.address).collect();
+        reported_nodes.sort();
+        let mut expected_nodes = node_addresses.clone();
+        expected_nodes.sort();
+        assert_eq!(reported_nodes, expected_nodes, "reported nodes mismatch");
+        assert!(
+            hopr_module.nodes.iter().all(|n| n.registered_safe.is_none()),
+            "registered_safe should be unresolved before fill_node_registry_status"
+        );
+
+        // the channels contract is scoped as a (non-node) target
+        assert!(
+            hopr_module
+                .targets
+                .iter()
+                .any(|(addr, _)| addr == instances.channels.address()),
+            "channels should be a scoped target"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fill_node_registry_status() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+        let deployer_vec: Vec<Address> = vec![deployer_addr];
+
+        // create a safe with the deployer included as its single node
+        let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            deployer_vec.clone(),
+            deployer_vec.clone(),
+            U256::from(1),
+        )
+        .await?;
+
+        // the deployer (its own node) registers itself to the safe in the node-safe registry
+        instances
+            .safe_registry
+            .registerSafeByNode(*safe.address())
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        // resolve registry status for the registered node and an unregistered one
+        let unregistered = get_random_address_for_testing();
+        let mut nodes = vec![
+            SafeNodeStatus {
+                address: deployer_addr,
+                registered_safe: None,
+            },
+            SafeNodeStatus {
+                address: unregistered,
+                registered_safe: None,
+            },
+        ];
+
+        fill_node_registry_status(instances.safe_registry.clone(), &mut nodes).await?;
+
+        assert_eq!(
+            nodes[0].registered_safe,
+            Some(*safe.address()),
+            "registered node should resolve to its safe"
+        );
+        assert_eq!(
+            nodes[1].registered_safe,
+            Some(Address::ZERO),
+            "unregistered node should resolve to the zero address"
+        );
+
+        Ok(())
+    }
 }

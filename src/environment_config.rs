@@ -260,4 +260,70 @@ mod tests {
         assert_eq!(chain_id, anvil.chain_id());
         Ok(())
     }
+
+    #[test]
+    fn test_load_all_networks_from_embedded_config() -> anyhow::Result<()> {
+        let networks = load_all_networks(None)?;
+        assert!(!networks.is_empty(), "embedded config should contain networks");
+        assert!(
+            networks.contains_key("anvil-localhost"),
+            "embedded config should contain the anvil-localhost network"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_all_networks_round_trip_from_file() -> anyhow::Result<()> {
+        // serialise the embedded networks to a contracts-addresses.json and read them back
+        let embedded = load_all_networks(None)?;
+        assert!(!embedded.is_empty(), "embedded config should contain networks");
+
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = temp_dir.path().join("contracts-addresses.json");
+        let config = NetworkConfig {
+            networks: embedded.clone(),
+        };
+        std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
+
+        let from_file = load_all_networks(temp_dir.path().to_str())?;
+        assert_eq!(from_file, embedded, "networks read from file should match the embedded ones");
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_all_networks_missing_file_errors() {
+        let err = load_all_networks(Some("/non/existent/contracts/root")).expect_err("missing file should error");
+        assert!(
+            matches!(err, HelperErrors::UnableToReadFromPath(_)),
+            "expected UnableToReadFromPath, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_load_all_networks_invalid_json_errors() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = temp_dir.path().join("contracts-addresses.json");
+        std::fs::write(&path, "{ this is not valid json }")?;
+
+        let err = load_all_networks(temp_dir.path().to_str()).expect_err("invalid json should error");
+        assert!(matches!(err, HelperErrors::SerdeJson(_)), "expected SerdeJson, got {err:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_build_provider_without_signer_connects() -> anyhow::Result<()> {
+        let anvil = create_anvil_at_port(false);
+        let provider = build_provider_without_signer(&anvil.endpoint()).await?;
+        let chain_id = provider.get_chain_id().await?;
+        assert_eq!(chain_id, anvil.chain_id());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_build_provider_without_signer_rejects_invalid_url() {
+        let err = build_provider_without_signer("not a url")
+            .await
+            .expect_err("invalid url should error");
+        assert!(matches!(err, HelperErrors::ParseError(_)), "expected ParseError, got {err:?}");
+    }
 }
