@@ -53,6 +53,7 @@ jobs:
       version_type: pr
       build_matrix: >-
         [
+
           {
             "runner": "depot-ubuntu-24.04-4",
             "architecture": "x86_64-linux",
@@ -89,4 +90,3 @@ jobs:
           topic: "Core"
           content: |
             The merge pipeline has failed for pull request [#${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-

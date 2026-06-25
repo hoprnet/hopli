@@ -1,6 +1,4 @@
----
 name: PR
-
 on:
   merge_group:
     types: [checks_requested]
@@ -10,15 +8,12 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-
 permissions:
   contents: read
   id-token: write # zizmor: ignore[excessive-permissions]
-
 concurrency:
   group: ${{ github.event.pull_request.head.ref || github.ref_name }}-pr
   cancel-in-progress: true
-
 jobs:
   validate-pr-title:
     name: Validate title
@@ -45,7 +40,6 @@ jobs:
           ignoreLabels: |
             bot
             ignore-semantic-pull-request
-
   label:
     name: Add labels
     if: github.event_name == 'pull_request'
@@ -77,7 +71,6 @@ jobs:
           if [[ "$HEAD_REPO" != "$BASE_REPO" ]]; then
             gh pr edit "$PR_NUMBER" --add-label "external"
           fi
-
   checks:
     name: Check
     uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@bbd22e57cf954c15f0a6051d59329857809141dd # workflow-checks-v1
@@ -88,7 +81,6 @@ jobs:
       deps_command: 'nix develop .#ci -c bash -c "cargo machete"'
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
   tests:
     name: Test
     uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
@@ -104,7 +96,6 @@ jobs:
       test_timeout: 60
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
   build-candidate-binaries:
     name: Build Candidate Binaries
     runs-on: depot-ubuntu-24.04-4
@@ -137,7 +128,6 @@ jobs:
         env:
           BINARY: ${{ matrix.binary }}
         run: nix build .#"${BINARY}"-candidate
-
   build-binaries:
     name: Binary ${{ matrix.architecture }}
     strategy:
@@ -172,7 +162,6 @@ jobs:
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
-
   build-docker:
     name: Docker
     needs: build-binaries
@@ -186,6 +175,7 @@ jobs:
       version_type: commit
       build_matrix: >-
         [
+
           {
             "runner": "depot-ubuntu-24.04-4",
             "architecture": "x86_64-linux",

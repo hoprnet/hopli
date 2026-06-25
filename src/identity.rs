@@ -37,12 +37,12 @@
 use std::{collections::HashMap, str::FromStr};
 
 use clap::{Parser, builder::RangedU64ValueParser};
-use hopr_crypto_keypair::key_pair::HoprKeys;
 use hopr_types::{
     crypto::{
         keypairs::Keypair,
         prelude::{OffchainPublicKey, PeerId},
     },
+    keypair::key_pair::HoprKeys,
     primitive::{prelude::ToHex, primitives::Address},
 };
 use tracing::{debug, info};

@@ -105,7 +105,14 @@
           };
 
           hopliPackages = import ./nix/packages/hopli.nix {
-            inherit builders src depsSrc rev buildPlatform nixLib;
+            inherit
+              builders
+              src
+              depsSrc
+              rev
+              buildPlatform
+              nixLib
+              ;
           };
 
           dockerEnv = [
@@ -390,16 +397,21 @@
             audit = run-audit;
             coverage-unit = {
               type = "app";
-              program = toString (pkgs.writeShellScript "coverage-unit" ''
-                nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov
-              '');
+              program = toString (
+                pkgs.writeShellScript "coverage-unit" ''
+                  nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov
+                ''
+              );
             };
           };
 
-          packages = hopliPackages // hopliDocker // {
-            inherit pre-commit-check;
-            default = hopliPackages.hopli;
-          };
+          packages =
+            hopliPackages
+            // hopliDocker
+            // {
+              inherit pre-commit-check;
+              default = hopliPackages.hopli;
+            };
 
           devShells.default = devShell;
           devShells.ci = ciShell;
@@ -412,7 +424,6 @@
             extraPackages = [ pkgs.foundry-bin ];
           };
 
-          formatter = config.treefmt.build.wrapper;
         };
       # platforms which are supported as build environments
       systems = [
