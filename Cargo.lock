@@ -1724,7 +1724,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "hopli"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "alloy-transport-http",
  "anyhow",
@@ -2378,7 +2378,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "hopr-bindings",
- "hopr-crypto-keypair",
  "hopr-types",
  "lazy_static",
  "mimalloc",
@@ -2414,35 +2413,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "hopr-crypto-keypair"
-version = "0.5.3"
-source = "git+https://github.com/hoprnet/hoprnet?branch=master#d59075cd5ad7003c190c331e3c03fddbdef65b4a"
-dependencies = [
- "hex",
- "hopr-platform",
- "hopr-types",
- "scrypt",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "typenum",
- "uuid",
-]
-
-[[package]]
-name = "hopr-platform"
-version = "0.3.1"
-source = "git+https://github.com/hoprnet/hoprnet?branch=master#d59075cd5ad7003c190c331e3c03fddbdef65b4a"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "hopr-types"
-version = "1.8.0"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f06ce2e57452d2b33e65e6fe9f320422fee2b87970e6ef07803005827e28dfb"
+checksum = "75e82a6426de74cdef7bbef15f651ce546ab39fc77ef1dc4002247b6bbf034fc"
 dependencies = [
  "aes",
  "anyhow",
@@ -2472,9 +2446,11 @@ dependencies = [
  "rand 0.10.1",
  "rayon",
  "regex",
+ "scrypt",
  "secp256k1 0.31.1",
  "serde",
  "serde_bytes",
+ "serde_json",
  "serde_with",
  "sha2 0.10.9",
  "sha3 0.10.9",
@@ -2484,6 +2460,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "typenum",
+ "uuid",
  "zeroize",
 ]
 

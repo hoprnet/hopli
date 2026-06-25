@@ -27,7 +27,8 @@ in
   );
 
   hopli-coverage = builders.localCoverage.callPackage nixLib.mkRustPackage (
-    hopliBuildArgs // {
+    hopliBuildArgs
+    // {
       runCoverage = true;
       cargoLlvmCovExtraArgs = "--lcov --output-path $out --lib";
     }

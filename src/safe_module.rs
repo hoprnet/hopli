@@ -90,7 +90,7 @@
 //!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//!
+//! 
 //! - Replace a module with a new module (v4 compatible) and include nodes in the new one
 //! ```text
 //! hopli safe-module replace \
@@ -105,7 +105,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//!
+//! 
 //! - Create a new module (v4 compatible) and adds nodes to the new module
 //! ```text
 //! hopli safe-module new-module \
@@ -119,7 +119,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//!
+//! 
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \

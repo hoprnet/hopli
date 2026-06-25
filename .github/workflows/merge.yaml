@@ -1,3 +1,4 @@
+---
 name: Merge
 on:
   pull_request:
@@ -25,7 +26,7 @@ jobs:
           - architecture: aarch64-linux
             runner: depot-ubuntu-24.04-arm-4
             build_command: nix build -L .#binary-hopli-aarch64-linux
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b4ee9597f2c47f62fbc2c989a4af36fc4abf2f6f # build-binaries-v3
     permissions:
       contents: read
       id-token: write
@@ -89,4 +90,3 @@ jobs:
           topic: "Core"
           content: |
             The merge pipeline has failed for pull request [#${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
