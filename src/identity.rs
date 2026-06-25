@@ -137,7 +137,7 @@ impl IdentitySubcommands {
                     let file_prefix = local_id
                         .identity_prefix
                         .as_ref()
-                        .map(|provided_name| provided_name.to_owned() + &index.to_string());
+                        .map(|provided_name| format!("{provided_name}{index}"));
 
                     let (id_filename, identity) = create_identity(&id_dir, &pwd, &file_prefix)
                         .map_err(|_| HelperErrors::UnableToCreateIdentity)?;
