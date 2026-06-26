@@ -5,11 +5,10 @@ use std::str::FromStr;
 use SafeContract::SafeContractInstance;
 use hopr_bindings::{
     config::ContractInstances,
-    constants::DEFAULT_CAPABILITY_PERMISSIONS,
     constants::{
-        SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141, SAFE_DEPLOYER_ADDRESS, SAFE_DEPLOYER_BALANCE,
-        SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE, SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE, SAFE_PROXY_FACTORY_DEPLOY_CODE,
-        SAFE_SINGLETON_ADDRESS, SAFE_SINGLETON_DEPLOY_CODE_V141,
+        DEFAULT_CAPABILITY_PERMISSIONS, SAFE_COMPATIBILITY_FALLBACK_HANDLER_DEPLOY_CODE_V141, SAFE_DEPLOYER_ADDRESS,
+        SAFE_DEPLOYER_BALANCE, SAFE_DIAMOND_PROXY_SINGLETON_DEPLOY_CODE, SAFE_MULTISEND_CALL_ONLY_DEPLOY_CODE,
+        SAFE_PROXY_FACTORY_DEPLOY_CODE, SAFE_SINGLETON_ADDRESS, SAFE_SINGLETON_DEPLOY_CODE_V141,
     },
     exports::alloy::{
         self,
@@ -30,10 +29,10 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken::{self, HoprTokenInstance},
 };
-use hopr_crypto_keypair::errors::KeyPairError;
 use hopr_types::{
     chain::errors::ChainTypesError,
     crypto::{keypairs::ChainKeypair, prelude::Keypair},
+    keypair::errors::KeyPairError,
 };
 use thiserror::Error;
 use tracing::debug;

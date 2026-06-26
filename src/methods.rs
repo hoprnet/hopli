@@ -486,15 +486,14 @@ pub async fn transfer_or_mint_tokens<P: Provider + WalletProvider>(
 
         let calls: Vec<Call3> = addresses
             .into_iter()
-            .zip(amounts.into_iter())
+            .zip(amounts)
             .map(|(addr, amount)| {
                 let calldata = hopr_token.transferFrom(caller, addr, amount);
-                let call = Call3 {
+                Call3 {
                     target: *hopr_token.address(),
                     allowFailure: false,
                     callData: calldata.calldata().clone(),
-                };
-                call
+                }
             })
             .collect::<Vec<_>>();
         let aggregate3_payload = aggregate3Call { calls }.abi_encode();

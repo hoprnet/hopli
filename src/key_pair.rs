@@ -14,9 +14,9 @@ use std::{
 };
 
 use clap::{Parser, ValueHint};
-use hopr_crypto_keypair::key_pair::{HoprKeys, IdentityRetrievalModes};
 use hopr_types::{
     crypto::keypairs::{ChainKeypair, Keypair},
+    keypair::key_pair::{HoprKeys, IdentityRetrievalModes},
     primitive::primitives::Address,
 };
 use tracing::{debug, error, info, warn};
