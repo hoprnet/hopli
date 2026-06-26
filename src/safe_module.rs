@@ -5,21 +5,16 @@
 //!     - create a Safe proxy instance and HOPR node management module proxy instance
 //!     - include nodes configure default permissions on the created module proxy
 //!     - fund the node and Safe with some native tokens and HOPR tokens respectively
-//!     - approve HOPR tokens to be transferred from the Safe proxy instaces by Channels contract
-//!     - Use manager wallet to add nodes and staking safes to the Network Registry contract
 //! - [SafeModuleSubcommands::Move] moves a node from to an existing Safe. Note that the Safe should has a node
 //!   management module attached and configured. Note that the admin key of the old and new safes are the same. This
 //!   command does not support moving nodes to safes controled by a different admin key. Note that all the safes
 //!   involved (old and new) should have a threshold of 1 Detailed breakdown of the steps:
 //!     - use old safes to deregister nodes from Node-safe registry
 //!     - use the new safe to include nodes to the module
-//!     - use manager wallet to deregister nodes from the network registry
-//!     - use manager wallet to register nodes with new safes to the network regsitry
 //! - [SafeModuleSubcommands::Migrate] migrates a node to a different network. It performs the following steps:
 //!     - add the Channel contract of the new network to the module as target and set default permissions.
 //!     - add the Announcement contract as target to the module
 //!     - approve HOPR tokens of the Safe proxy to be transferred by the new Channels contract
-//!     - Use the manager wallet to add nodes and Safes to the Network Registry contract of the new network.
 //! - [SafeModuleSubcommands::Debug] goes through a series of checks to debug the setup of a node and safe. It checks
 //!   the following items. The INFO level of the tracing logger MUST be enabled to see the output of the debug command.
 //!     - node xDAI balance
@@ -35,6 +30,11 @@
 //!   new one.
 //! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and adds nodes to the new module.
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
+//! - [SafeModuleSubcommands::AddNode] adds an existing node identity to an already-deployed safe and module pair,
+//!   without creating new contracts or deregistering from a previous safe.
+//! - [SafeModuleSubcommands::CheckSafe] inspects a Safe address and reports its setup: owners, threshold, attached
+//!   modules, the HOPR module's targets (channels/announcement), the linked nodes and their node-safe registry status,
+//!   and which known HOPR network configuration matches the on-chain state.
 //!
 //! Some sample commands
 //! - Express creation of a safe and a module
@@ -120,6 +120,26 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
+//! - Inspect a safe and report its setup, which network it matches, and linked nodes
+//! ```text
+//! hopli safe-module check-safe \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --provider-url "https://gnosis-rpc.example/"
+//! ```
+//! 
+//! - Add an existing node identity to an existing safe and module
+//! ```text
+//! hopli safe-module add-node \
+//!     --network anvil-localhost \
+//!     --contracts-root "../ethereum/contracts" \
+//!     --identity-from-path "./test/node.id" \
+//!     --password-path "./test/pwd" \
+//!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
+//!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "http://localhost:8545"
+//! ```
+//! 
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -134,7 +154,10 @@ use std::str::FromStr;
 
 use clap::{Parser, builder::RangedU64ValueParser};
 use hopr_bindings::{
-    exports::alloy::primitives::{Address, U256, utils::parse_units},
+    exports::alloy::{
+        primitives::{Address, U256, utils::parse_units},
+        providers::Provider,
+    },
     hopr_node_safe_registry::HoprNodeSafeRegistry,
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
@@ -143,14 +166,14 @@ use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{
-    environment_config::NetworkProviderArgs,
+    environment_config::{NetworkProviderArgs, build_provider_without_signer, load_all_networks},
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
-        SafeSingleton, add_new_network_target_to_module, create_new_module_and_include_nodes,
+        SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
         create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
         debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
-        deregister_nodes_from_node_safe_registry_and_remove_from_module, include_nodes_to_module, migrate_nodes,
-        transfer_native_tokens, transfer_or_mint_tokens,
+        deregister_nodes_from_node_safe_registry_and_remove_from_module, fill_node_registry_status,
+        include_nodes_to_module, migrate_nodes, transfer_native_tokens, transfer_or_mint_tokens,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -229,8 +252,8 @@ pub enum SafeModuleSubcommands {
         #[command(flatten)]
         private_key: PrivateKeyArgs,
 
-        /// Access to the private key, of which the wallet has `MANAGER_ROLE` of network registry
-        /// If provided, this wallet will grant the created safe access to the network registry
+        /// Accepted for backwards compatibility. Currently unused — network-registry
+        /// registration is no longer performed by this command.
         #[command(flatten, name = "manager_private_key")]
         manager_private_key: ManagerPrivateKeyArgs,
     },
@@ -315,8 +338,8 @@ pub enum SafeModuleSubcommands {
         #[command(flatten)]
         private_key: PrivateKeyArgs,
 
-        /// Access to the private key, of which the wallet has `MANAGER_ROLE` of network registry
-        /// If provided, this wallet will grant the created safe access to the network registry
+        /// Accepted for backwards compatibility. Currently unused — network-registry
+        /// registration is no longer performed by this command.
         #[command(flatten, name = "manager_private_key")]
         manager_private_key: ManagerPrivateKeyArgs,
     },
@@ -448,6 +471,61 @@ pub enum SafeModuleSubcommands {
 
         /// Access to the private key, of which the wallet either contains sufficient assets
         /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Inspect a Safe and report its setup, attached HOPR module, linked nodes,
+    /// and which known network configuration matches the on-chain state.
+    #[command(visible_alias = "cs")]
+    CheckSafe {
+        /// Customized RPC provider endpoint
+        #[clap(help = "Blockchain RPC provider endpoint.", long, short = 'r')]
+        provider_url: String,
+
+        /// Optional path to a `contracts-addresses.json` (defaults to embedded config)
+        #[clap(
+            env = "HOPLI_CONTRACTS_ROOT",
+            help = "Specify path pointing to the contracts root (optional, defaults to embedded config)",
+            long,
+            short = 'c'
+        )]
+        contracts_root: Option<String>,
+
+        /// safe address to inspect
+        #[clap(help = "Safe address to inspect", long, short = 's')]
+        safe_address: String,
+    },
+
+    /// Add an existing node identity to an already-deployed safe and module pair
+    #[command(visible_alias = "an")]
+    AddNode {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// safe address that the nodes will be added to
+        #[clap(help = "Safe address that owns the module", long, short = 's')]
+        safe_address: String,
+
+        /// module address that the nodes will be included in
+        #[clap(help = "Module address to which the nodes are added", long, short = 'm')]
+        module_address: String,
+
+        /// Access to the private key of a safe owner
         #[command(flatten)]
         private_key: PrivateKeyArgs,
     },
@@ -978,6 +1056,206 @@ impl SafeModuleSubcommands {
         .await?;
         Ok(())
     }
+
+    /// Execute the command which inspects a Safe and reports its setup,
+    /// attached HOPR module, linked nodes, and the matching network configuration.
+    pub async fn execute_safe_module_check_safe(
+        provider_url: String,
+        contracts_root: Option<String>,
+        safe_address: String,
+    ) -> Result<(), HelperErrors> {
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+
+        let rpc_provider = build_provider_without_signer(&provider_url).await?;
+        let chain_id = rpc_provider
+            .get_chain_id()
+            .await
+            .map_err(|e| HelperErrors::MiddlewareError(e.to_string()))?;
+        let all_networks = load_all_networks(contracts_root.as_deref())?;
+
+        // narrow candidate networks to those matching the connected chain id
+        let candidates: Vec<_> = all_networks.iter().filter(|(_, n)| n.chain_id == chain_id).collect();
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+        let mut report = check_safe_setup(safe).await?;
+
+        // Resolve node-safe registrations against the registry of the network this module is
+        // actually configured for, identified by its channels target. Several HOPR networks
+        // share a chain id but use different registries, so we must NOT just pick the first
+        // candidate — that would query the wrong registry and report false "not registered".
+        if let Some(m) = report.hopr_module.as_mut() {
+            let registry_address = m.targets.iter().find_map(|(addr, _)| {
+                candidates
+                    .iter()
+                    .find(|(_, c)| c.addresses.channels == *addr)
+                    .map(|(_, c)| c.addresses.node_safe_registry)
+            });
+            if let Some(registry_address) = registry_address {
+                let registry = HoprNodeSafeRegistry::new(registry_address, rpc_provider.clone());
+                fill_node_registry_status(registry, &mut m.nodes).await?;
+            }
+        }
+
+        info!("Safe {:?}", safe_addr);
+        info!("  threshold {}/{}", report.threshold, report.owners.len());
+        for o in &report.owners {
+            info!("  owner: {:?}", o);
+        }
+        info!("Attached modules ({}):", report.modules.len());
+        for m in &report.modules {
+            info!("  - {:?}", m);
+        }
+
+        match &report.hopr_module {
+            None => {
+                warn!("No HOPR Node Management Module found among the Safe's modules");
+            }
+            Some(m) => {
+                info!("HOPR Node Management Module:");
+                info!("  address: {:?}", m.address);
+                info!("  owner:   {:?} (matches safe: {})", m.owner, m.owner == safe_addr);
+
+                // Classify each non-node target by matching its address against known
+                // contract addresses in candidate networks. The encoded target_type byte
+                // alone can't distinguish announcement from wxHOPR-token (both 0x00).
+                let mut found_channels: Option<(Address, Vec<&str>)> = None;
+                let mut found_announcement: Option<(Address, Vec<&str>)> = None;
+                let mut found_token: Option<(Address, Vec<&str>)> = None;
+                let mut unknowns: Vec<(Address, u8)> = Vec::new();
+
+                for (addr, ty) in &m.targets {
+                    let ch: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.channels == *addr).then_some(n.as_str()))
+                        .collect();
+                    let ann: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.announcements == *addr).then_some(n.as_str()))
+                        .collect();
+                    let tok: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| (c.addresses.token == *addr).then_some(n.as_str()))
+                        .collect();
+
+                    if !ch.is_empty() {
+                        found_channels = Some((*addr, ch));
+                    } else if !ann.is_empty() {
+                        found_announcement = Some((*addr, ann));
+                    } else if !tok.is_empty() {
+                        found_token = Some((*addr, tok));
+                    } else {
+                        unknowns.push((*addr, *ty));
+                    }
+                }
+
+                // headline: which network this module is configured for (channels is the key)
+                match &found_channels {
+                    None => warn!("  network: unknown (no recognised channels target on module)"),
+                    Some((a, nets)) => info!("  network: {} (channels target {:?})", nets.join(", "), a),
+                }
+
+                // announcement target health (silent if it matches the same network as channels)
+                let channels_nets = found_channels.as_ref().map(|(_, n)| n.as_slice());
+                match (&found_announcement, channels_nets) {
+                    (None, _) => {
+                        warn!("  announcement target not set — run `safe-module migrate` to finish initialisation")
+                    }
+                    (Some((_, ann)), Some(ch)) if ann.as_slice() == ch => {}
+                    (Some((a, ann)), _) => warn!(
+                        "  announcement target {:?} points to a DIFFERENT network ({}) than channels",
+                        a,
+                        ann.join(", ")
+                    ),
+                }
+
+                if let Some((a, _)) = &found_token {
+                    info!("  wxHOPR token target scoped: {:?}", a);
+                }
+                for (a, ty) in &unknowns {
+                    warn!("  unrecognised target {:?} (target_type byte {:#04x})", a, ty);
+                }
+
+                info!("Nodes included in module ({}):", m.nodes.len());
+                for n in &m.nodes {
+                    match n.registered_safe {
+                        None => info!(
+                            "  - {:?} — node-safe registry: not checked (module network unknown)",
+                            n.address
+                        ),
+                        Some(s) if s == Address::ZERO => {
+                            info!("  - {:?} — node-safe registry: not registered", n.address)
+                        }
+                        Some(s) if s == safe_addr => {
+                            info!("  - {:?} — node-safe registry: registered to this safe", n.address)
+                        }
+                        Some(s) => warn!(
+                            "  - {:?} — node-safe registry: registered to a DIFFERENT safe {:?}",
+                            n.address, s
+                        ),
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute the command, which adds existing node identities to an already-deployed
+    /// safe and module pair. The signer of `private_key` must be an owner of the safe.
+    pub async fn execute_safe_module_add_node(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        safe_address: String,
+        module_address: String,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        // read all the node addresses
+        let mut node_eth_addresses: Vec<Address> = Vec::new();
+        if let Some(addresses) = node_address {
+            node_eth_addresses.extend(
+                addresses
+                    .split(',')
+                    .map(|addr| {
+                        Address::from_str(addr)
+                            .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        node_eth_addresses.extend(
+            local_identity
+                .to_addresses()
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
+                .into_iter()
+                .map(a2h),
+        );
+
+        if node_eth_addresses.is_empty() {
+            return Err(HelperErrors::InvalidAddress(
+                "no node address provided via --node-address or identity files".into(),
+            ));
+        }
+
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+        let module_addr = Address::from_str(&module_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
+
+        let signer_private_key = private_key.read_default()?;
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+
+        let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
+
+        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr, signer_private_key).await?;
+        info!(
+            "Nodes {:?} have been included in module {:?} owned by safe {:?}",
+            node_eth_addresses, module_addr, safe_addr
+        );
+
+        Ok(())
+    }
 }
 
 impl Cmd for SafeModuleSubcommands {
@@ -1124,6 +1402,420 @@ impl Cmd for SafeModuleSubcommands {
                 )
                 .await
             }
+            SafeModuleSubcommands::CheckSafe {
+                provider_url,
+                contracts_root,
+                safe_address,
+            } => {
+                SafeModuleSubcommands::execute_safe_module_check_safe(provider_url, contracts_root, safe_address).await
+            }
+            SafeModuleSubcommands::AddNode {
+                network_provider,
+                local_identity,
+                node_address,
+                safe_address,
+                module_address,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_safe_module_add_node(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    safe_address,
+                    module_address,
+                    private_key,
+                )
+                .await
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use hopr_bindings::config::{ContractInstances, NetworksWithContractAddresses, SingleNetworkContractAddresses};
+    use hopr_types::crypto::keypairs::ChainKeypair;
+
+    use super::*;
+    use crate::{key_pair::PasswordArgs, methods::create_rpc_client_to_anvil, utils::create_anvil};
+
+    /// `IdentityFileArgs` with no identity sources — node addresses come from `--node-address`.
+    fn empty_identity() -> IdentityFileArgs {
+        IdentityFileArgs {
+            identity_from_directory: None,
+            identity_from_path: None,
+            password: PasswordArgs::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+
+        // capture the deployed contract addresses before the stake factory is moved into the deploy call
+        let channels_addr = *instances.channels.address();
+        let contract_addresses = instances.get_contract_addresses();
+
+        // deploy a safe + module with the deployer as owner and as the single node
+        let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            channels_addr,
+            vec![deployer_addr],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // register the node to the safe so the node-safe registry branch is exercised
+        instances
+            .safe_registry
+            .registerSafeByNode(*safe.address())
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        // write a contracts-addresses.json describing the local network so the command can
+        // match the on-chain channels target to a known network and its node-safe registry
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let contracts_root = temp_dir.path().to_str().unwrap().to_string();
+        let mut networks = BTreeMap::new();
+        networks.insert(
+            "anvil-localhost".to_string(),
+            SingleNetworkContractAddresses {
+                chain_id: anvil.chain_id(),
+                indexer_start_block_number: 0u32,
+                addresses: contract_addresses,
+            },
+        );
+        let config = NetworksWithContractAddresses { networks };
+        std::fs::write(
+            temp_dir.path().join("contracts-addresses.json"),
+            serde_json::to_string_pretty(&config)?,
+        )?;
+
+        // the command inspects the safe and logs its report; it should succeed
+        SafeModuleSubcommands::execute_safe_module_check_safe(
+            anvil.endpoint(),
+            Some(contracts_root),
+            safe.address().to_string(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe_invalid_address() {
+        let err = SafeModuleSubcommands::execute_safe_module_check_safe(
+            "http://127.0.0.1:8545".to_string(),
+            None,
+            "not-an-address".to_string(),
+        )
+        .await
+        .expect_err("invalid safe address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let node_addresses: Vec<Address> = vec![Address::from([0x11u8; 20]), Address::from([0x22u8; 20])];
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+
+        // deploy a safe + module owned by the deployer, with no nodes yet
+        let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            vec![],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // none of the nodes are included yet
+        for node in &node_addresses {
+            assert!(
+                !node_module.isNode(*node).call().await?,
+                "node should not be included yet"
+            );
+        }
+
+        // the deployer (the safe owner) adds the nodes via the command, passed as --node-address
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            &anvil.endpoint(),
+        ])?;
+        let private_key = PrivateKeyArgs {
+            private_key: Some(hex::encode(contract_deployer.secret().as_ref())),
+        };
+        let node_csv = node_addresses
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            Some(node_csv),
+            safe.address().to_string(),
+            node_module.address().to_string(),
+            private_key,
+        )
+        .await?;
+
+        // the nodes are now included in the module
+        for node in &node_addresses {
+            assert!(
+                node_module.isNode(*node).call().await?,
+                "node should be included after add-node"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node_requires_a_node() {
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            "http://127.0.0.1:8545",
+        ])
+        .expect("args should parse");
+
+        // no node address and no identity files -> nothing to add
+        let err = SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            None,
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "0x0000000000000000000000000000000000000002".to_string(),
+            PrivateKeyArgs::default(),
+        )
+        .await
+        .expect_err("missing node address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe_unknown_network() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+
+        // deploy a safe + module with the deployer as the single node
+        let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            vec![deployer_addr],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // No contracts-addresses.json is supplied, so the connected chain id (anvil's default
+        // 31337) matches none of the bundled networks. The channels target is therefore
+        // unrecognised and the node-safe registry cannot be resolved. The command should still
+        // succeed while taking the "network unknown", "unrecognised target", and
+        // "registry not checked" reporting branches.
+        SafeModuleSubcommands::execute_safe_module_check_safe(anvil.endpoint(), None, safe.address().to_string())
+            .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_check_safe_node_not_registered() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch anvil and deploy contracts + safe suites
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
+                .await
+                .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone()).await?;
+
+        let deployer_addr = a2h(contract_deployer.public().to_address());
+        let channels_addr = *instances.channels.address();
+        let contract_addresses = instances.get_contract_addresses();
+
+        // deploy a safe + module with the deployer as the single node
+        let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            channels_addr,
+            vec![deployer_addr],
+            vec![deployer_addr],
+            U256::from(1),
+        )
+        .await?;
+
+        // describe the local network so the channels target is recognised and the node-safe
+        // registry is resolved. Unlike the happy-path test the node is never registered, so the
+        // registry returns the zero address — exercising the "not registered" reporting branch.
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let contracts_root = temp_dir.path().to_str().unwrap().to_string();
+        let mut networks = BTreeMap::new();
+        networks.insert(
+            "anvil-localhost".to_string(),
+            SingleNetworkContractAddresses {
+                chain_id: anvil.chain_id(),
+                indexer_start_block_number: 0u32,
+                addresses: contract_addresses,
+            },
+        );
+        let config = NetworksWithContractAddresses { networks };
+        std::fs::write(
+            temp_dir.path().join("contracts-addresses.json"),
+            serde_json::to_string_pretty(&config)?,
+        )?;
+
+        SafeModuleSubcommands::execute_safe_module_check_safe(
+            anvil.endpoint(),
+            Some(contracts_root),
+            safe.address().to_string(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node_invalid_node_address() {
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            "http://127.0.0.1:8545",
+        ])
+        .expect("args should parse");
+
+        // a malformed --node-address must be rejected before any chain interaction
+        let err = SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            Some("0xnot-an-address".to_string()),
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "0x0000000000000000000000000000000000000002".to_string(),
+            PrivateKeyArgs::default(),
+        )
+        .await
+        .expect_err("invalid node address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node_invalid_safe_address() {
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            "http://127.0.0.1:8545",
+        ])
+        .expect("args should parse");
+
+        // node address is valid, but the safe address is malformed -- it must be rejected
+        let err = SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            Some("0x0000000000000000000000000000000000000003".to_string()),
+            "not-an-address".to_string(),
+            "0x0000000000000000000000000000000000000002".to_string(),
+            PrivateKeyArgs::default(),
+        )
+        .await
+        .expect_err("invalid safe address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_safe_module_add_node_invalid_module_address() {
+        let network_provider = NetworkProviderArgs::try_parse_from([
+            "hopli",
+            "--network",
+            "anvil-localhost",
+            "--provider-url",
+            "http://127.0.0.1:8545",
+        ])
+        .expect("args should parse");
+
+        // node and safe addresses are valid, but the module address is malformed
+        let err = SafeModuleSubcommands::execute_safe_module_add_node(
+            network_provider,
+            empty_identity(),
+            Some("0x0000000000000000000000000000000000000003".to_string()),
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "not-an-address".to_string(),
+            PrivateKeyArgs::default(),
+        )
+        .await
+        .expect_err("invalid module address should error");
+        assert!(
+            matches!(err, HelperErrors::InvalidAddress(_)),
+            "expected InvalidAddress, got {err:?}"
+        );
     }
 }
