@@ -1,8 +1,8 @@
 [package]
-name = "hopli"
-version = "0.18.0"
 edition = "2024"
 license = "GPL-3.0-only"
+name    = "hopli"
+version = "0.18.0"
 
 [lib]
 name = "hopli_lib"

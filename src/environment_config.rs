@@ -83,7 +83,8 @@ pub fn load_all_networks(
     contracts_root: Option<&str>,
 ) -> Result<BTreeMap<String, SingleNetworkContractAddresses>, HelperErrors> {
     if let Some(contract_root) = contracts_root {
-        let contract_environment_config_path = PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
+        let contract_environment_config_path =
+            PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
         let file_read =
             std::fs::read_to_string(contract_environment_config_path).map_err(HelperErrors::UnableToReadFromPath)?;
         let cfg: NetworkConfig = serde_json::from_str(&file_read).map_err(HelperErrors::SerdeJson)?;
@@ -286,7 +287,10 @@ mod tests {
         std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
 
         let from_file = load_all_networks(temp_dir.path().to_str())?;
-        assert_eq!(from_file, embedded, "networks read from file should match the embedded ones");
+        assert_eq!(
+            from_file, embedded,
+            "networks read from file should match the embedded ones"
+        );
         Ok(())
     }
 
@@ -306,7 +310,10 @@ mod tests {
         std::fs::write(&path, "{ this is not valid json }")?;
 
         let err = load_all_networks(temp_dir.path().to_str()).expect_err("invalid json should error");
-        assert!(matches!(err, HelperErrors::SerdeJson(_)), "expected SerdeJson, got {err:?}");
+        assert!(
+            matches!(err, HelperErrors::SerdeJson(_)),
+            "expected SerdeJson, got {err:?}"
+        );
         Ok(())
     }
 
@@ -324,6 +331,9 @@ mod tests {
         let err = build_provider_without_signer("not a url")
             .await
             .expect_err("invalid url should error");
-        assert!(matches!(err, HelperErrors::ParseError(_)), "expected ParseError, got {err:?}");
+        assert!(
+            matches!(err, HelperErrors::ParseError(_)),
+            "expected ParseError, got {err:?}"
+        );
     }
 }

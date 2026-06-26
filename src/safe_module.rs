@@ -119,14 +119,14 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//!
+//! 
 //! - Inspect a safe and report its setup, which network it matches, and linked nodes
 //! ```text
 //! hopli safe-module check-safe \
 //!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
 //!     --provider-url "https://gnosis-rpc.example/"
 //! ```
-//!
+//! 
 //! - Add an existing node identity to an existing safe and module
 //! ```text
 //! hopli safe-module add-node \
@@ -139,7 +139,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//!
+//! 
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -172,9 +172,8 @@ use crate::{
         SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
         create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
         debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
-        fill_node_registry_status,
-        deregister_nodes_from_node_safe_registry_and_remove_from_module, include_nodes_to_module, migrate_nodes,
-        transfer_native_tokens, transfer_or_mint_tokens,
+        deregister_nodes_from_node_safe_registry_and_remove_from_module, fill_node_registry_status,
+        include_nodes_to_module, migrate_nodes, transfer_native_tokens, transfer_or_mint_tokens,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -1076,10 +1075,7 @@ impl SafeModuleSubcommands {
         let all_networks = load_all_networks(contracts_root.as_deref())?;
 
         // narrow candidate networks to those matching the connected chain id
-        let candidates: Vec<_> = all_networks
-            .iter()
-            .filter(|(_, n)| n.chain_id == chain_id)
-            .collect();
+        let candidates: Vec<_> = all_networks.iter().filter(|(_, n)| n.chain_id == chain_id).collect();
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
         let mut report = check_safe_setup(safe).await?;
@@ -1162,9 +1158,9 @@ impl SafeModuleSubcommands {
                 // announcement target health (silent if it matches the same network as channels)
                 let channels_nets = found_channels.as_ref().map(|(_, n)| n.as_slice());
                 match (&found_announcement, channels_nets) {
-                    (None, _) => warn!(
-                        "  announcement target not set — run `safe-module migrate` to finish initialisation"
-                    ),
+                    (None, _) => {
+                        warn!("  announcement target not set — run `safe-module migrate` to finish initialisation")
+                    }
                     (Some((_, ann)), Some(ch)) if ann.as_slice() == ch => {}
                     (Some((a, ann)), _) => warn!(
                         "  announcement target {:?} points to a DIFFERENT network ({}) than channels",
@@ -1443,11 +1439,7 @@ mod tests {
     use hopr_types::crypto::keypairs::ChainKeypair;
 
     use super::*;
-    use crate::{
-        key_pair::PasswordArgs,
-        methods::create_rpc_client_to_anvil,
-        utils::create_anvil,
-    };
+    use crate::{key_pair::PasswordArgs, methods::create_rpc_client_to_anvil, utils::create_anvil};
 
     /// `IdentityFileArgs` with no identity sources — node addresses come from `--node-address`.
     fn empty_identity() -> IdentityFileArgs {
