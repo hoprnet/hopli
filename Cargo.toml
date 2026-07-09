@@ -2,7 +2,7 @@
 edition = "2024"
 license = "GPL-3.0-only"
 name    = "hopli"
-version = "0.17.5"
+version = "0.17.6"
 
 [lib]
 name = "hopli_lib"
