@@ -2,7 +2,7 @@
 edition = "2024"
 license = "GPL-3.0-only"
 name    = "hopli"
-version = "0.17.5"
+version = "0.17.6"
 
 [lib]
 name = "hopli_lib"
@@ -23,12 +23,12 @@ default = []
 
 [dependencies]
 alloy-transport-http = { version = "2.0.4", features = ["reqwest-default-tls"] }
-anyhow = "1.0.100"
-clap = { version = "4.5.51", features = ["derive", "env", "string"] }
+anyhow = "1.0.103"
+clap = { version = "4.6.1", features = ["derive", "env", "string"] }
 hex = "0.4.3"
 hex-literal = "1.1.0"
 lazy_static = "1.5.0"
-rpassword = "7.4.0"
+rpassword = "7.5.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.17"
@@ -44,11 +44,11 @@ tracing-subscriber = { version = "0.3.20", features = [
   "registry",
   "std",
 ] }
-url = { version = "2.5.7", features = ["serde"] }
-uuid = { version = "1.18.1" }
+url = { version = "2.5.8", features = ["serde"] }
+uuid = { version = "1.23.4" }
 
 hopr-bindings = "4.9.1"
-hopr-types = { version = "1.8.2", features = [
+hopr-types = { version = "1.11.1", features = [
   "chain",
   "crypto",
   "internal",
@@ -62,8 +62,8 @@ hopr-types = { version = "1.8.2", features = [
 
 
 [dev-dependencies]
-env_logger = "0.11.8"
-tempfile   = "3.23.0"
+env_logger = "0.11.11"
+tempfile   = "3.27.0"
 
 
 # Target-specific dependencies for memory allocators
