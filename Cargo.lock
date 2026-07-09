@@ -2615,7 +2615,7 @@ dependencies = [
 
 [[package]]
 name = "hopli"
-version = "0.17.5"
+version = "0.17.6"
 dependencies = [
  "alloy-transport-http",
  "anyhow",
