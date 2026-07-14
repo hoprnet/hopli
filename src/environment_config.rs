@@ -224,9 +224,10 @@ mod tests {
         // create client
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy local contracts
-        let instances = ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer_address))
-            .await
-            .expect("failed to deploy");
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer_address), anvil.addresses()[1])
+                .await
+                .expect("failed to deploy");
 
         // temporary write the contract addresses to a json file
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
