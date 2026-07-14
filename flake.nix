@@ -156,6 +156,7 @@
               extraContents = [ hopliPackages.binary-hopli-aarch64-linux ];
               Entrypoint = [ "/bin/hopli" ];
               env = dockerEnv;
+              pkgsLinux = pkgs;
             };
             docker-hopli-x86_64-linux-dev = nixLib.mkDockerImage {
               name = "hopli";
