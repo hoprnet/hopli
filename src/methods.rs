@@ -1341,12 +1341,17 @@ pub fn create_rpc_client_to_anvil(
     signer: &hopr_types::crypto::keypairs::ChainKeypair,
 ) -> Arc<AnvilRpcClient> {
     use hopr_bindings::exports::alloy::{
-        providers::ProviderBuilder, rpc::client::ClientBuilder, signers::local::PrivateKeySigner,
-        transports::http::ReqwestTransport,
+        network::EthereumWallet, providers::ProviderBuilder, rpc::client::ClientBuilder,
+        signers::local::PrivateKeySigner, transports::http::ReqwestTransport,
     };
     use hopr_types::crypto::keypairs::Keypair;
 
-    let wallet = PrivateKeySigner::from_slice(signer.secret().as_ref()).expect("failed to construct wallet");
+    let common_deployer = PrivateKeySigner::from_slice(anvil.keys()[1].to_bytes().as_ref())
+        .expect("failed to construct common deployer wallet");
+    let contract_deployer =
+        PrivateKeySigner::from_slice(signer.secret().as_ref()).expect("failed to construct contract deployer wallet");
+    let mut wallet = EthereumWallet::from(common_deployer);
+    wallet.register_default_signer(contract_deployer);
 
     let transport_client = ReqwestTransport::new(anvil.endpoint_url());
 
@@ -1413,12 +1418,15 @@ mod tests {
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy hopr contracts
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
 
         // get native and token balances
         let (native_balance, token_balance) = get_native_and_token_balances(instances.token, vec![kp_address]).await?;
@@ -1445,14 +1453,17 @@ mod tests {
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy hopr contracts
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         println!("deployed hopr contracts {:?}", instances);
 
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // grant deployer token minter role
         let encoded_minter_role = keccak256(b"MINTER_ROLE");
         instances
@@ -1502,13 +1513,16 @@ mod tests {
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy hopr contracts
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
 
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // grant deployer token minter role
         let encoded_minter_role = keccak256(b"MINTER_ROLE");
         instances
@@ -1556,13 +1570,16 @@ mod tests {
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
         // deploy hopr contracts
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
 
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
 
         // transfer or mint tokens to addresses
         let total_transferred_amount =
@@ -1596,13 +1613,16 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
 
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
 
         // transfer native tokens to addresses
         let total_transferred_amount =
@@ -1670,14 +1690,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         let caller = client.default_signer_address();
 
@@ -1775,14 +1798,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         // grant deployer token minter role
         let encoded_minter_role = keccak256(b"MINTER_ROLE");
@@ -1872,16 +1898,19 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
 
         println!("deployed hopr contracts {:?}", instances);
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         // register some nodes
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
@@ -1944,14 +1973,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         // create a safe
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
@@ -2039,14 +2071,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         let deployer_vec: Vec<Address> = vec![a2h(contract_deployer.public().to_address())];
 
@@ -2117,14 +2152,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         let deployer_vec: Vec<Address> = vec![a2h(contract_deployer.public().to_address())];
 
@@ -2173,13 +2211,13 @@ mod tests {
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let self_address: Address = a2h(contract_deployer.public().to_address());
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances = ContractInstances::deploy_for_testing(client.clone(), self_address)
+        let instances = ContractInstances::deploy_for_testing(client.clone(), self_address, anvil.addresses()[1])
             .await
             .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         // deploy some new contracts for the new network
         let new_safe_registry = HoprNodeSafeRegistry::deploy(client.clone()).await?;
@@ -2245,14 +2283,17 @@ mod tests {
         let anvil = create_anvil(None);
         let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
         let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
-        let instances =
-            ContractInstances::deploy_for_testing(client.clone(), a2h(contract_deployer.public().to_address()))
-                .await
-                .expect("failed to deploy");
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
         // deploy multicall contract
-        ContractInstances::deploy_multicall3(client.clone()).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
         // deploy safe suits
-        ContractInstances::deploy_safe_suites(client.clone()).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
 
         let deployer_vec: Vec<Address> = vec![a2h(contract_deployer.public().to_address())];
 
