@@ -49,7 +49,7 @@ pub struct NetworkConfig {
 pub struct NetworkProviderArgs {
     /// Name of the network that the node is running on
     #[clap(help = "Network name. E.g. monte_rosa", long, short)]
-    network: String,
+    pub network: String,
 
     /// Path to the files storing contract addresses (`contracts-addresses.json`).
     /// If not provided, uses embedded configuration from hopr-bindings dependency.
@@ -59,11 +59,11 @@ pub struct NetworkProviderArgs {
         long,
         short
     )]
-    contracts_root: Option<String>,
+    pub contracts_root: Option<String>,
 
     /// Customized RPC provider endpoint
     #[clap(help = "Blockchain RPC provider endpoint.", long, short = 'r')]
-    provider_url: String,
+    pub provider_url: String,
 }
 
 impl Default for NetworkProviderArgs {
@@ -76,49 +76,26 @@ impl Default for NetworkProviderArgs {
     }
 }
 
-/// Load every known network (contract addresses + chain id), from a local
-/// `contracts-addresses.json` if `contracts_root` is provided, otherwise from
-/// the embedded `hopr-bindings` configuration.
-pub fn load_all_networks(
-    contracts_root: Option<&str>,
-) -> Result<BTreeMap<String, SingleNetworkContractAddresses>, HelperErrors> {
-    if let Some(contract_root) = contracts_root {
-        let contract_environment_config_path =
-            PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
-        let file_read =
-            std::fs::read_to_string(contract_environment_config_path).map_err(HelperErrors::UnableToReadFromPath)?;
-        let cfg: NetworkConfig = serde_json::from_str(&file_read).map_err(HelperErrors::SerdeJson)?;
-        Ok(cfg.networks)
-    } else {
-        Ok(hopr_bindings::config::NetworksWithContractAddresses::default().networks)
-    }
-}
-
-/// Build a no-signer RPC provider from a URL.
-pub async fn build_provider_without_signer(provider_url: &str) -> Result<Arc<RpcProviderWithoutSigner>, HelperErrors> {
-    let parsed_url = url::Url::parse(provider_url).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
-    let transport_client = ReqwestTransport::new(parsed_url);
-    let rpc_client = ClientBuilder::default().transport(transport_client.clone(), transport_client.guess_local());
-
-    if rpc_client.is_local() {
-        rpc_client.set_poll_interval(std::time::Duration::from_millis(10));
-    };
-
-    let provider = ProviderBuilder::new()
-        .disable_recommended_fillers()
-        .filler(ChainIdFiller::default())
-        .filler(NonceFiller::new(CachedNonceManager::default()))
-        .filler(GasFiller::default())
-        .filler(BlobGasFiller::default())
-        .connect_client(rpc_client);
-
-    Ok(Arc::new(provider))
-}
-
 impl NetworkProviderArgs {
+    /// Load every known network (contract addresses + chain id), from a local
+    /// `contracts-addresses.json` if `contracts_root` is provided, otherwise from
+    /// the embedded `hopr-bindings` configuration.
+    pub fn load_all_networks(&self) -> Result<BTreeMap<String, SingleNetworkContractAddresses>, HelperErrors> {
+        if let Some(contract_root) = self.contracts_root.as_deref() {
+            let contract_environment_config_path =
+                PathBuf::from(OsStr::new(contract_root)).join("contracts-addresses.json");
+            let file_read = std::fs::read_to_string(contract_environment_config_path)
+                .map_err(HelperErrors::UnableToReadFromPath)?;
+            let cfg: NetworkConfig = serde_json::from_str(&file_read).map_err(HelperErrors::SerdeJson)?;
+            Ok(cfg.networks)
+        } else {
+            Ok(hopr_bindings::config::NetworksWithContractAddresses::default().networks)
+        }
+    }
+
     /// Get the network details (contract addresses, chain id) from network names
     pub fn get_network_details_from_name(&self) -> Result<SingleNetworkContractAddresses, HelperErrors> {
-        load_all_networks(self.contracts_root.as_deref())?
+        self.load_all_networks()?
             .get(&self.network)
             .cloned()
             .ok_or_else(|| HelperErrors::UnknownNetwork)
@@ -156,7 +133,28 @@ impl NetworkProviderArgs {
 
     /// get the provider object without signer
     pub async fn get_provider_without_signer(&self) -> Result<Arc<RpcProviderWithoutSigner>, HelperErrors> {
-        build_provider_without_signer(&self.provider_url).await
+        // Build transport
+        let parsed_url =
+            url::Url::parse(self.provider_url.as_str()).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
+        let transport_client = ReqwestTransport::new(parsed_url);
+
+        // Build JSON RPC client
+        let rpc_client = ClientBuilder::default().transport(transport_client.clone(), transport_client.guess_local());
+
+        if rpc_client.is_local() {
+            rpc_client.set_poll_interval(std::time::Duration::from_millis(10));
+        };
+
+        // Build default JSON RPC provider
+        let provider = ProviderBuilder::new()
+            .disable_recommended_fillers()
+            .filler(ChainIdFiller::default())
+            .filler(NonceFiller::new(CachedNonceManager::default()))
+            .filler(GasFiller::default())
+            .filler(BlobGasFiller::default())
+            .connect_client(rpc_client);
+
+        Ok(Arc::new(provider))
     }
 }
 
@@ -249,7 +247,7 @@ mod tests {
 
         let network_provider_args = NetworkProviderArgs {
             network: "anvil-localhost".into(),
-            contracts_root: Some(contracts_root_path.into()),
+            contracts_root: Some(contracts_root_path),
             provider_url: anvil.endpoint(),
         };
 
@@ -264,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_load_all_networks_from_embedded_config() -> anyhow::Result<()> {
-        let networks = load_all_networks(None)?;
+        let networks = NetworkProviderArgs::default().load_all_networks()?;
         assert!(!networks.is_empty(), "embedded config should contain networks");
         assert!(
             networks.contains_key("anvil-localhost"),
@@ -276,7 +274,7 @@ mod tests {
     #[test]
     fn test_load_all_networks_round_trip_from_file() -> anyhow::Result<()> {
         // serialise the embedded networks to a contracts-addresses.json and read them back
-        let embedded = load_all_networks(None)?;
+        let embedded = NetworkProviderArgs::default().load_all_networks()?;
         assert!(!embedded.is_empty(), "embedded config should contain networks");
 
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -286,7 +284,11 @@ mod tests {
         };
         std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
 
-        let from_file = load_all_networks(temp_dir.path().to_str())?;
+        let args = NetworkProviderArgs {
+            contracts_root: temp_dir.path().to_str().map(String::from),
+            ..Default::default()
+        };
+        let from_file = args.load_all_networks()?;
         assert_eq!(
             from_file, embedded,
             "networks read from file should match the embedded ones"
@@ -296,7 +298,11 @@ mod tests {
 
     #[test]
     fn test_load_all_networks_missing_file_errors() {
-        let err = load_all_networks(Some("/non/existent/contracts/root")).expect_err("missing file should error");
+        let args = NetworkProviderArgs {
+            contracts_root: Some("/non/existent/contracts/root".into()),
+            ..Default::default()
+        };
+        let err = args.load_all_networks().expect_err("missing file should error");
         assert!(
             matches!(err, HelperErrors::UnableToReadFromPath(_)),
             "expected UnableToReadFromPath, got {err:?}"
@@ -309,7 +315,11 @@ mod tests {
         let path = temp_dir.path().join("contracts-addresses.json");
         std::fs::write(&path, "{ this is not valid json }")?;
 
-        let err = load_all_networks(temp_dir.path().to_str()).expect_err("invalid json should error");
+        let args = NetworkProviderArgs {
+            contracts_root: temp_dir.path().to_str().map(String::from),
+            ..Default::default()
+        };
+        let err = args.load_all_networks().expect_err("invalid json should error");
         assert!(
             matches!(err, HelperErrors::SerdeJson(_)),
             "expected SerdeJson, got {err:?}"
@@ -318,17 +328,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_provider_without_signer_connects() -> anyhow::Result<()> {
+    async fn test_get_provider_without_signer_connects() -> anyhow::Result<()> {
         let anvil = create_anvil_at_port(false);
-        let provider = build_provider_without_signer(&anvil.endpoint()).await?;
+        let args = NetworkProviderArgs {
+            provider_url: anvil.endpoint(),
+            ..Default::default()
+        };
+        let provider = args.get_provider_without_signer().await?;
         let chain_id = provider.get_chain_id().await?;
         assert_eq!(chain_id, anvil.chain_id());
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_build_provider_without_signer_rejects_invalid_url() {
-        let err = build_provider_without_signer("not a url")
+    async fn test_get_provider_without_signer_rejects_invalid_url() {
+        let args = NetworkProviderArgs {
+            provider_url: "not a url".into(),
+            ..Default::default()
+        };
+        let err = args
+            .get_provider_without_signer()
             .await
             .expect_err("invalid url should error");
         assert!(

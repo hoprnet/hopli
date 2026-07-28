@@ -90,7 +90,7 @@
 //!     --module-address 0x5d46d0c5279fd85ce7365e4d668f415685922839 \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//! 
+//!
 //! - Replace a module with a new module (v4 compatible) and include nodes in the new one
 //! ```text
 //! hopli safe-module replace \
@@ -105,7 +105,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//! 
+//!
 //! - Create a new module (v4 compatible) and adds nodes to the new module
 //! ```text
 //! hopli safe-module new-module \
@@ -119,14 +119,14 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//! 
+//!
 //! - Inspect a safe and report its setup, which network it matches, and linked nodes
 //! ```text
 //! hopli safe-module check-safe \
 //!     --safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
 //!     --provider-url "https://gnosis-rpc.example/"
 //! ```
-//! 
+//!
 //! - Add an existing node identity to an existing safe and module
 //! ```text
 //! hopli safe-module add-node \
@@ -139,7 +139,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-//! 
+//!
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -166,7 +166,7 @@ use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{
-    environment_config::{NetworkProviderArgs, build_provider_without_signer, load_all_networks},
+    environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
         SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
@@ -1067,12 +1067,19 @@ impl SafeModuleSubcommands {
         let safe_addr = Address::from_str(&safe_address)
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
 
-        let rpc_provider = build_provider_without_signer(&provider_url).await?;
+        // The `CheckSafe` command has no network argument; the network is discovered
+        // from the chain id, so the struct's default network name is never used.
+        let network_provider = NetworkProviderArgs {
+            provider_url,
+            contracts_root,
+            ..Default::default()
+        };
+        let rpc_provider = network_provider.get_provider_without_signer().await?;
         let chain_id = rpc_provider
             .get_chain_id()
             .await
             .map_err(|e| HelperErrors::MiddlewareError(e.to_string()))?;
-        let all_networks = load_all_networks(contracts_root.as_deref())?;
+        let all_networks = network_provider.load_all_networks()?;
 
         // narrow candidate networks to those matching the connected chain id
         let candidates: Vec<_> = all_networks.iter().filter(|(_, n)| n.chain_id == chain_id).collect();

@@ -1923,7 +1923,7 @@ mod tests {
         transfer_or_mint_tokens(
             instances.token.clone(),
             vec![a2h(contract_deployer.public().to_address())],
-            vec![desired_amount.clone()],
+            vec![desired_amount],
         )
         .await?;
 
