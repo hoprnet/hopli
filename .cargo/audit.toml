@@ -3,6 +3,8 @@ ignore = [
   "RUSTSEC-2024-0388", # 'derivative' in 'alloy' [unmaintained],
   "RUSTSEC-2024-0436", # 'paste' dependency in 'alloy' [unmaintained]
   "RUSTSEC-2026-0173", # 'proc-macro-error2' [unmaintained]
+  "RUSTSEC-2026-0204", # 'crossbeam-epoch' - needs new rayon version
+
 ]
 informational_warnings = ["unmaintained"]
 severity_threshold = "low"

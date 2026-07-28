@@ -5,7 +5,7 @@
     # Core Nix ecosystem dependencies
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/release-26.05";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # HOPR Nix Library (provides flake-utils and reusable build functions)
@@ -156,6 +156,7 @@
               extraContents = [ hopliPackages.binary-hopli-aarch64-linux ];
               Entrypoint = [ "/bin/hopli" ];
               env = dockerEnv;
+              pkgsLinux = pkgs;
             };
             docker-hopli-x86_64-linux-dev = nixLib.mkDockerImage {
               name = "hopli";

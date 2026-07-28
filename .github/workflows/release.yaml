@@ -91,6 +91,8 @@ jobs:
     steps:
       - name: Release version
         uses: hoprnet/hopr-workflows/actions/release-version@9c452ef512e6a7d5119125af9fc1aa45591a632f # release-version-v5
+        env:
+          PRE_COMMIT_ALLOW_NO_CONFIG: "1"
         with:
           source_branch: ${{ github.ref_name }}
           release_type: ${{ inputs.release_type }}

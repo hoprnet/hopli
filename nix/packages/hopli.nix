@@ -67,6 +67,10 @@ in
   # Follow https://github.com/nixos/nixpkgs/pull/256590
   binary-hopli-x86_64-darwin = builders.x86_64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
   # CAVEAT: must be built from a darwin system
-  binary-hopli-aarch64-darwin = builders.aarch64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
+  binary-hopli-aarch64-darwin =
+    if buildPlatform.system == "aarch64-darwin" then
+      builders.local.callPackage nixLib.mkRustPackage hopliBuildArgs
+    else
+      builders.aarch64-darwin.callPackage nixLib.mkRustPackage hopliBuildArgs;
 
 }
