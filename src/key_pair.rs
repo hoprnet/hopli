@@ -170,8 +170,7 @@ pub trait ArgEnvReader<T, K> {
 /// Arguments for private key.
 #[derive(Debug, Clone, Parser, Default)]
 pub struct PrivateKeyArgs {
-    /// Either provide a private key as argument or as a specific environment variable, e.g. `PRIVATE_KEY`,
-    /// `MANAGER_PRIVATE_KEY`
+    /// Either provide a private key as argument or as the `PRIVATE_KEY` environment variable.
     #[clap(
         long,
         short = 'k',
@@ -222,61 +221,19 @@ impl ArgEnvReader<ChainKeypair, String> for PrivateKeyArgs {
     }
 }
 
-/// Arguments for private key.
+/// Deprecated, no-op arg kept so existing scripts passing `--manager-private-key`
+/// keep parsing without an "unexpected argument" error. A `MANAGER_PRIVATE_KEY`
+/// environment variable is simply ignored. The value is never read.
 #[derive(Debug, Clone, Parser, Default)]
 pub struct ManagerPrivateKeyArgs {
-    /// Either provide a private key as argument or as a specific environment variable, e.g. `PRIVATE_KEY`,
-    /// `MANAGER_PRIVATE_KEY`
     #[clap(
         long,
         short = 'q',
-        help = "Private key to unlock the account with privilege that broadcasts the transaction",
         name = "manager_private_key",
-        value_name = "MANAGER_PRIVATE_KEY"
+        value_name = "MANAGER_PRIVATE_KEY",
+        hide = true
     )]
     pub manager_private_key: Option<String>,
-}
-
-impl ArgEnvReader<ChainKeypair, String> for ManagerPrivateKeyArgs {
-    /// Return the wrapped key. cli arg: --manager-private-key
-    fn get_key(&self) -> Option<String> {
-        self.manager_private_key.to_owned()
-    }
-
-    /// Read the value from either the cli arg or env
-    fn read(&self, default_env_name: &str) -> Result<ChainKeypair, HelperErrors> {
-        let pri_key = if let Some(pk) = self.get_key() {
-            info!("Reading manager private key from CLI");
-            pk
-        } else if let Ok(env_pk) = env::var(default_env_name) {
-            info!(
-                "Reading manager private key from environment variable {:?}",
-                default_env_name
-            );
-            env_pk
-        } else if let Ok(prompt_pk) = rpassword::prompt_password("Enter manager private key:") {
-            info!("Reading manager private key from prompt");
-            prompt_pk
-        } else {
-            error!(
-                "Unable to read private key from environment variable: {:?}",
-                default_env_name
-            );
-            return Err(HelperErrors::UnableToReadPrivateKey(default_env_name.into()));
-        };
-
-        // trim the 0x prefix if needed
-        let priv_key_without_prefix = pri_key.strip_prefix("0x").unwrap_or(&pri_key).to_string();
-        let decoded_key = hex::decode(priv_key_without_prefix)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to decode private key: {e:?}")))?;
-        ChainKeypair::from_secret(&decoded_key)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to create keypair: {e:?}")))
-    }
-
-    /// Read the default private key and return an address string
-    fn read_default(&self) -> Result<ChainKeypair, HelperErrors> {
-        self.read("MANAGER_PRIVATE_KEY")
-    }
 }
 
 /// Arguments for password.

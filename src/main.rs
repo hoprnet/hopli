@@ -43,7 +43,7 @@ enum Commands {
     #[clap(about = "Fund given address and/or addressed derived from identity files native tokens or HOPR tokens")]
     Faucet(FaucetArgs),
 
-    /// Commands around safe module
+    /// Manage a HOPR staking Safe and its attached Node Management Module
     #[command(visible_alias = "sm")]
     SafeModule {
         #[command(subcommand)]

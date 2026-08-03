@@ -66,9 +66,8 @@ Supported environment variables:
 - `IDENTITY_PASSWORD`
 - `NEW_IDENTITY_PASSWORD`
 - `PRIVATE_KEY`
-- `MANAGER_PRIVATE_KEY`
 
-Equivalent CLI flags are available (`--password-path`, `--new-password-path`, `--private-key`, `--manager-private-key`).
+Equivalent CLI flags are available (`--password-path`, `--new-password-path`, `--private-key`).
 
 ## Commands
 
@@ -162,8 +161,7 @@ hopli safe-module create \
   --allowance 10 \
   --hopr-amount 10 \
   --native-amount 0.1 \
-  --private-key <PRIVATE_KEY> \
-  --manager-private-key <MANAGER_PRIVATE_KEY>
+  --private-key <PRIVATE_KEY>
 ```
 
 Migrate existing safe/module to another network config:
@@ -179,6 +177,29 @@ hopli safe-module migrate \
   --private-key <PRIVATE_KEY>
 ```
 
+Inspect a safe — owners/threshold, attached modules, linked nodes, and which known network the on-chain setup matches:
+
+```bash
+hopli safe-module check-safe \
+  --provider-url https://gnosis-rpc.example/ \
+  --safe-address 0xSafe...
+```
+
+No `--network` flag is required; check-safe reads the chain id from the RPC and tries to match the module's targets against every known network configuration.
+
+Add an existing node identity to an already-deployed safe/module pair:
+
+```bash
+hopli safe-module add-node \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --safe-address 0xSafe... \
+  --module-address 0xModule... \
+  --identity-from-path ./identities/node.id \
+  --password-path ./secrets/identity.pwd \
+  --private-key <PRIVATE_KEY>
+```
+
 Move nodes to a new safe/module pair:
 
 ```bash
@@ -189,8 +210,7 @@ hopli safe-module move \
   --new-safe-address 0xNewSafe... \
   --new-module-address 0xNewModule... \
   --node-address 0xNode1...,0xNode2... \
-  --private-key <PRIVATE_KEY> \
-  --manager-private-key <MANAGER_PRIVATE_KEY>
+  --private-key <PRIVATE_KEY>
 ```
 
 ### 4. Winning probability
