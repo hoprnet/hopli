@@ -2702,7 +2702,7 @@ dependencies = [
  "env_logger",
  "hex",
  "hex-literal",
- "hopr-bindings",
+ "hopr-bindings 4.12.2",
  "hopr-types",
  "lazy_static",
  "mimalloc",
@@ -2724,6 +2724,23 @@ name = "hopr-bindings"
 version = "4.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0375fb0dc90a31484ae7620ce71681203f5ed1ee670cab51e02fb3b7a9d351dc"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "const_format",
+ "hex-literal",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hopr-bindings"
+version = "4.12.2"
+source = "git+https://github.com/hoprnet/contracts/?rev=a6f8e5e81779ced5b68ef100f2fc30734eca19f4#a6f8e5e81779ced5b68ef100f2fc30734eca19f4"
 dependencies = [
  "alloy",
  "anyhow",
@@ -2763,7 +2780,7 @@ dependencies = [
  "float-cmp",
  "hash2curve",
  "hex-literal",
- "hopr-bindings",
+ "hopr-bindings 4.12.0",
  "hybrid-array",
  "k256 0.14.0",
  "lazy_static",
