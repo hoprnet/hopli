@@ -47,8 +47,8 @@ tracing-subscriber = { version = "0.3.20", features = [
 url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.4" }
 
-hopr-bindings = "4.12.2"
-hopr-types = { version = "2.3.0", features = [
+hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "6ce45eb5e7d433545d82ea32e27562eb0fc329c3" }
+hopr-types = { git = "https://github.com/hoprnet/hopr-types", rev = "2a3bb391f1f98475d033b105c69090d050aaff0c", features = [
   "chain",
   "crypto",
   "internal",
@@ -105,14 +105,3 @@ strip           = false
 
 [package.metadata.cargo-machete]
 ignored = ["alloy-transport-http"]
-
-# TODO: revert to crates.io versions once contracts publishes hopr-bindings 4.12.2 and
-# hopr-types publishes 2.3.0. Mirrors the TODO in hopr-types/Cargo.toml.
-[patch.crates-io]
-hopr-bindings = { path = "../contracts/ethereum/bindings" }
-hopr-types = { path = "../hopr-types" }
-
-# hopr-types pins hopr-bindings to a contracts git rev, so patching crates.io alone leaves two
-# copies of the crate in the graph and their alloy types stop unifying.
-[patch."https://github.com/hoprnet/contracts"]
-hopr-bindings = { path = "../contracts/ethereum/bindings" }
