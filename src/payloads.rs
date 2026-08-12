@@ -8,7 +8,7 @@ use hopr_bindings::{
     },
     exports::alloy::{
         network::TransactionBuilder,
-        primitives::{Address, Bytes, U256, aliases::U56},
+        primitives::{Address, B256, Bytes, U256, aliases::U56},
         providers::{
             CallInfoTrait, MULTICALL3_ADDRESS,
             bindings::IMulticall3::{Call3, Call3Value, aggregate3Call, aggregate3ValueCall},
@@ -19,10 +19,15 @@ use hopr_bindings::{
     },
     hopr_node_management_module::HoprNodeManagementModule::includeNodeCall,
     hopr_node_stake_factory::HoprNodeStakeFactory::{cloneCall, predictModuleAddress_1Call},
-    hopr_token::HoprToken::{sendCall, transferCall},
+    hopr_service_registry::HoprServiceRegistry::{
+        recoverTokensCall, registerServiceTypeCall, selfDeregisterCall, selfRegisterCall, selfUpdateCall,
+        setNodeSafeRegistryCall, setRequirementCall, setSelfRegistrationBurnCall, setSelfUpdateBurnCall,
+        setTypeRegistrationFeeCall, transferTypeOwnershipCall,
+    },
+    hopr_token::HoprToken::{approveCall, sendCall, transferCall},
     hopr_winning_probability_oracle::HoprWinningProbabilityOracle::setWinProbCall,
 };
-use hopr_types::internal::prelude::WinningProbability;
+use hopr_types::internal::prelude::{ServiceMetadata, ServiceType, WinningProbability};
 use tracing::{debug, info};
 
 use crate::{
@@ -330,9 +335,429 @@ pub fn set_winning_probability(
     Ok(tx)
 }
 
+/// The `bytes32` service type id as the `HoprServiceRegistry` ABI expects it.
+fn service_type_id(service_type: &ServiceType) -> B256 {
+    B256::from(service_type.as_encoded())
+}
+
+/// Builds a request carrying `payload` to `contract_address`.
+fn call_payload(contract_address: Address, payload: Vec<u8>) -> TransactionRequest {
+    TransactionRequest::default()
+        .with_to(contract_address)
+        .with_input(payload)
+}
+
+/// Approve `spender` to pull exactly `amount` wxHOPR from the caller.
+///
+/// The service registry pulls its fees with `transferFrom`, so every paid registry call needs an
+/// allowance. The allowance is exact rather than unlimited on purpose: it is the caller's price
+/// protection. A fee raised between reading it and executing the call runs out of allowance and
+/// reverts, instead of silently overpaying (RFC section 3.6).
+pub fn approve_hopr_token_payload(token_address: Address, spender: Address, amount: U256) -> TransactionRequest {
+    call_payload(token_address, approveCall { spender, value: amount }.abi_encode())
+}
+
+/// Register `node` under `service_type` with `metadata`.
+///
+/// `msg.sender` must be the Safe bound to `node` in the node-safe registry, so this belongs in a
+/// Safe transaction, preceded by an [`approve_hopr_token_payload`] for the type's registration
+/// burn.
+pub fn self_register_service_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    node: Address,
+    metadata: &ServiceMetadata,
+) -> TransactionRequest {
+    let payload = selfRegisterCall {
+        serviceType: service_type_id(service_type),
+        node,
+        metadata: Bytes::copy_from_slice(metadata.as_ref()),
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Replace the metadata of the entry of `node` under `service_type`.
+///
+/// Same caller and allowance rules as [`self_register_service_payload`], against the type's
+/// update burn.
+pub fn self_update_service_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    node: Address,
+    metadata: &ServiceMetadata,
+) -> TransactionRequest {
+    let payload = selfUpdateCall {
+        serviceType: service_type_id(service_type),
+        node,
+        metadata: Bytes::copy_from_slice(metadata.as_ref()),
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Remove the entry of `node` under `service_type`.
+///
+/// Gated by the node-safe binding alone: it is free and takes no allowance, so that a bound node
+/// can always delist itself (invariant I6).
+pub fn self_deregister_service_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    node: Address,
+) -> TransactionRequest {
+    let payload = selfDeregisterCall {
+        serviceType: service_type_id(service_type),
+        node,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Claim `service_type` and become its owner.
+///
+/// Callable by anyone, first come first served, and payable in the global type registration fee,
+/// so it needs an [`approve_hopr_token_payload`] for that fee.
+pub fn register_service_type_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    requirement: Address,
+    registration_burn: U256,
+    update_burn: U256,
+) -> TransactionRequest {
+    let payload = registerServiceTypeCall {
+        serviceType: service_type_id(service_type),
+        requirement,
+        registrationBurn: registration_burn,
+        updateBurn: update_burn,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Point `service_type` at a new requirement contract, or open it up with the zero address.
+pub fn set_service_type_requirement_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    requirement: Address,
+) -> TransactionRequest {
+    let payload = setRequirementCall {
+        serviceType: service_type_id(service_type),
+        requirement,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Set the burn charged for registering an entry under `service_type`.
+pub fn set_self_registration_burn_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    amount: U256,
+) -> TransactionRequest {
+    let payload = setSelfRegistrationBurnCall {
+        serviceType: service_type_id(service_type),
+        amount,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Set the burn charged for updating an entry under `service_type`.
+pub fn set_self_update_burn_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    amount: U256,
+) -> TransactionRequest {
+    let payload = setSelfUpdateBurnCall {
+        serviceType: service_type_id(service_type),
+        amount,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Hand ownership of `service_type` to `new_owner`.
+///
+/// The zero address abandons the type, which is one way and unrecoverable (RFC section 3.1), and
+/// so is a wrong live address. The caller is responsible for confirming the target.
+pub fn transfer_service_type_ownership_payload(
+    service_registry_address: Address,
+    service_type: &ServiceType,
+    new_owner: Address,
+) -> TransactionRequest {
+    let payload = transferTypeOwnershipCall {
+        serviceType: service_type_id(service_type),
+        newOwner: new_owner,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Set the global fee charged for registering a new service type.
+pub fn set_type_registration_fee_payload(service_registry_address: Address, amount: U256) -> TransactionRequest {
+    call_payload(
+        service_registry_address,
+        setTypeRegistrationFeeCall { amount }.abi_encode(),
+    )
+}
+
+/// Repoint the registry at another node-safe registry.
+///
+/// The contract probes the new registry with `probe_node` and requires it to resolve to
+/// `expected_safe`, which keeps a typo from silently orphaning every entry.
+pub fn set_node_safe_registry_payload(
+    service_registry_address: Address,
+    node_safe_registry: Address,
+    probe_node: Address,
+    expected_safe: Address,
+) -> TransactionRequest {
+    let payload = setNodeSafeRegistryCall {
+        nodeSafeRegistry_: node_safe_registry,
+        probeNode: probe_node,
+        expectedSafe: expected_safe,
+    }
+    .abi_encode();
+    call_payload(service_registry_address, payload)
+}
+
+/// Sweep tokens that were transferred to the registry by mistake.
+pub fn recover_service_registry_tokens_payload(
+    service_registry_address: Address,
+    token: Address,
+    to: Address,
+) -> TransactionRequest {
+    call_payload(service_registry_address, recoverTokensCall { token, to }.abi_encode())
+}
+
 #[cfg(test)]
 mod tests {
+    use hex_literal::hex;
+
     use super::*;
+
+    /// `bytes32("gvpn:exit")`, the canonical GnosisVPN exit-node type id.
+    const SERVICE_TYPE: ServiceType = ServiceType::GVPN_EXIT;
+    const NODE: Address = Address::new(hex!("00000000000000000000000000000000000000aa"));
+    const REQUIREMENT: Address = Address::new(hex!("00000000000000000000000000000000000000bb"));
+    const NEW_OWNER: Address = Address::new(hex!("00000000000000000000000000000000000000cc"));
+    const SPENDER: Address = Address::new(hex!("00000000000000000000000000000000000000dd"));
+    const NODE_SAFE_REGISTRY: Address = Address::new(hex!("00000000000000000000000000000000000000e1"));
+    const PROBE_NODE: Address = Address::new(hex!("00000000000000000000000000000000000000e2"));
+    const EXPECTED_SAFE: Address = Address::new(hex!("00000000000000000000000000000000000000e3"));
+    const TOKEN: Address = Address::new(hex!("00000000000000000000000000000000000000f1"));
+    const RECIPIENT: Address = Address::new(hex!("00000000000000000000000000000000000000f2"));
+    /// The contract under test, only ever the `to` of the request, never part of the calldata.
+    const REGISTRY: Address = Address::new(hex!("0000000000000000000000000000000000000001"));
+
+    /// 1 wxHOPR, `0x0de0b6b3a7640000`.
+    fn one_token() -> U256 {
+        U256::from(1_000_000_000_000_000_000u64)
+    }
+
+    /// 0.5 wxHOPR, `0x06f05b59d3b20000`.
+    fn half_token() -> U256 {
+        U256::from(500_000_000_000_000_000u64)
+    }
+
+    /// Returns the calldata of `tx`, asserting it targets `expected_to`.
+    fn calldata(tx: &TransactionRequest, expected_to: Address) -> Vec<u8> {
+        assert_eq!(
+            tx.to.and_then(|kind| kind.to().copied()),
+            Some(expected_to),
+            "payload targets the wrong contract"
+        );
+        tx.input.input().expect("payload carries no calldata").to_vec()
+    }
+
+    // Every expected vector below was derived by hand, not read back from the bindings:
+    // selector = first 4 bytes of keccak256 of the canonical signature, followed by the standard
+    // ABI head/tail encoding of the arguments - one 32-byte word per static argument (addresses
+    // right-aligned, `bytes32` left-aligned as stored), and for `bytes` a head word holding the
+    // tail offset plus a tail of the length word followed by the right-padded data.
+
+    #[test]
+    fn test_self_register_service_payload_calldata() -> anyhow::Result<()> {
+        // keccak256("selfRegister(bytes32,address,bytes)")[..4] = 0x326005af; three head words
+        // (type, node, tail offset 0x60) then the `bytes` tail (length 5, "hello" right-padded).
+        let expected = hex!(
+            "326005af"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000aa"
+            "0000000000000000000000000000000000000000000000000000000000000060"
+            "0000000000000000000000000000000000000000000000000000000000000005"
+            "68656c6c6f000000000000000000000000000000000000000000000000000000"
+        );
+
+        let metadata = ServiceMetadata::try_from(b"hello".to_vec())?;
+        let tx = self_register_service_payload(REGISTRY, &SERVICE_TYPE, NODE, &metadata);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+        Ok(())
+    }
+
+    #[test]
+    fn test_self_update_service_payload_calldata() -> anyhow::Result<()> {
+        // keccak256("selfUpdate(bytes32,address,bytes)")[..4] = 0x210c3298; argument encoding is
+        // identical to `selfRegister`.
+        let expected = hex!(
+            "210c3298"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000aa"
+            "0000000000000000000000000000000000000000000000000000000000000060"
+            "0000000000000000000000000000000000000000000000000000000000000005"
+            "68656c6c6f000000000000000000000000000000000000000000000000000000"
+        );
+
+        let metadata = ServiceMetadata::try_from(b"hello".to_vec())?;
+        let tx = self_update_service_payload(REGISTRY, &SERVICE_TYPE, NODE, &metadata);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+        Ok(())
+    }
+
+    #[test]
+    fn test_self_deregister_service_payload_calldata() {
+        // keccak256("selfDeregister(bytes32,address)")[..4] = 0x1e46f907; two static words.
+        let expected = hex!(
+            "1e46f907"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000aa"
+        );
+
+        let tx = self_deregister_service_payload(REGISTRY, &SERVICE_TYPE, NODE);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_register_service_type_payload_calldata() {
+        // keccak256("registerServiceType(bytes32,address,uint256,uint256)")[..4] = 0x0ff55869;
+        // four static words: type, requirement, 1e18 (0x0de0b6b3a7640000), 5e17 (0x06f05b59d3b20000).
+        let expected = hex!(
+            "0ff55869"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000bb"
+            "0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+            "00000000000000000000000000000000000000000000000006f05b59d3b20000"
+        );
+
+        let tx = register_service_type_payload(REGISTRY, &SERVICE_TYPE, REQUIREMENT, one_token(), half_token());
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_set_service_type_requirement_payload_calldata() {
+        // keccak256("setRequirement(bytes32,address)")[..4] = 0x326d1f22.
+        let expected = hex!(
+            "326d1f22"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000bb"
+        );
+
+        let tx = set_service_type_requirement_payload(REGISTRY, &SERVICE_TYPE, REQUIREMENT);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_set_self_registration_burn_payload_calldata() {
+        // keccak256("setSelfRegistrationBurn(bytes32,uint256)")[..4] = 0xf13217a9.
+        let expected = hex!(
+            "f13217a9"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        );
+
+        let tx = set_self_registration_burn_payload(REGISTRY, &SERVICE_TYPE, one_token());
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_set_self_update_burn_payload_calldata() {
+        // keccak256("setSelfUpdateBurn(bytes32,uint256)")[..4] = 0x1cd0ad00.
+        let expected = hex!(
+            "1cd0ad00"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000006f05b59d3b20000"
+        );
+
+        let tx = set_self_update_burn_payload(REGISTRY, &SERVICE_TYPE, half_token());
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_transfer_service_type_ownership_payload_calldata() {
+        // keccak256("transferTypeOwnership(bytes32,address)")[..4] = 0x47ce2eef.
+        let expected = hex!(
+            "47ce2eef"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000000000000000cc"
+        );
+
+        let tx = transfer_service_type_ownership_payload(REGISTRY, &SERVICE_TYPE, NEW_OWNER);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_transfer_service_type_ownership_payload_abandons_with_zero_address() {
+        // Same selector, with the new owner word all zeroes: the one-way abandonment of RFC 3.1.
+        let expected = hex!(
+            "47ce2eef"
+            "6776706e3a657869740000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        );
+
+        let tx = transfer_service_type_ownership_payload(REGISTRY, &SERVICE_TYPE, Address::ZERO);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_set_type_registration_fee_payload_calldata() {
+        // keccak256("setTypeRegistrationFee(uint256)")[..4] = 0xb3f618d1; 2e18 = 0x1bc16d674ec80000.
+        let expected = hex!(
+            "b3f618d1"
+            "0000000000000000000000000000000000000000000000001bc16d674ec80000"
+        );
+
+        let tx = set_type_registration_fee_payload(REGISTRY, U256::from(2_000_000_000_000_000_000u64));
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_set_node_safe_registry_payload_calldata() {
+        // keccak256("setNodeSafeRegistry(address,address,address)")[..4] = 0x48559a57.
+        let expected = hex!(
+            "48559a57"
+            "00000000000000000000000000000000000000000000000000000000000000e1"
+            "00000000000000000000000000000000000000000000000000000000000000e2"
+            "00000000000000000000000000000000000000000000000000000000000000e3"
+        );
+
+        let tx = set_node_safe_registry_payload(REGISTRY, NODE_SAFE_REGISTRY, PROBE_NODE, EXPECTED_SAFE);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_recover_service_registry_tokens_payload_calldata() {
+        // keccak256("recoverTokens(address,address)")[..4] = 0x056097ac.
+        let expected = hex!(
+            "056097ac"
+            "00000000000000000000000000000000000000000000000000000000000000f1"
+            "00000000000000000000000000000000000000000000000000000000000000f2"
+        );
+
+        let tx = recover_service_registry_tokens_payload(REGISTRY, TOKEN, RECIPIENT);
+        assert_eq!(calldata(&tx, REGISTRY), expected.to_vec());
+    }
+
+    #[test]
+    fn test_approve_hopr_token_payload_calldata() {
+        // keccak256("approve(address,uint256)")[..4] = 0x095ea7b3; spender then the exact amount.
+        let expected = hex!(
+            "095ea7b3"
+            "00000000000000000000000000000000000000000000000000000000000000dd"
+            "0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        );
+
+        let tx = approve_hopr_token_payload(TOKEN, SPENDER, one_token());
+        assert_eq!(calldata(&tx, TOKEN), expected.to_vec());
+    }
 
     #[test]
     fn test_edge_node_deploy_safe_module_and_maybe_include_node() -> anyhow::Result<()> {
