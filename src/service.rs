@@ -3,16 +3,15 @@
 //!
 //! The commands fall into three groups, which differ in who has to sign them:
 //!
-//! - **Entry writes** (`register`, `update`, `deregister`). The registry accepts these only from
-//!   the Safe bound to the node in the node-safe registry, so they are sent as a Safe transaction
-//!   rather than from an EOA. `register` and `update` cost the type's burn in wxHOPR, so they are
-//!   batched behind an exact `approve` in the same MultiSend. `deregister` is free and needs no
-//!   approval, so that a bound node can always delist itself.
-//! - **Type-owner writes** (`register-type`, `set-requirement`, `set-registration-burn`,
-//!   `set-update-burn`, `transfer-type-ownership`) and **admin/manager writes** (`set-fee`,
-//!   `set-node-safe-registry`, `recover-tokens`). These come straight from the caller's key.
-//! - **Reads** (`get`, `list`, `types`). Plain view calls. Both list views are paginated and their
-//!   order is unstable, so a scan pins every one of its pages to a single block.
+//! - **Entry writes** (`register`, `update`, `deregister`). The registry accepts these only from the Safe bound to the
+//!   node in the node-safe registry, so they are sent as a Safe transaction rather than from an EOA. `register` and
+//!   `update` cost the type's burn in wxHOPR, so they are batched behind an exact `approve` in the same MultiSend.
+//!   `deregister` is free and needs no approval, so that a bound node can always delist itself.
+//! - **Type-owner writes** (`register-type`, `set-requirement`, `set-registration-burn`, `set-update-burn`,
+//!   `transfer-type-ownership`) and **admin/manager writes** (`set-fee`, `set-node-safe-registry`, `recover-tokens`).
+//!   These come straight from the caller's key.
+//! - **Reads** (`get`, `list`, `types`). Plain view calls. Both list views are paginated and their order is unstable,
+//!   so a scan pins every one of its pages to a single block.
 //!
 //! Some sample commands:
 //! - Register a node under a service type, through the node's Safe:
