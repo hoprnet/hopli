@@ -208,6 +208,20 @@ hopli safe-module add-node \
   --private-key <PRIVATE_KEY>
 ```
 
+Scope the current network's service registry on a module created before service-registry support:
+
+```bash
+hopli safe-module add-service-registry-target \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --safe-address 0xSafe... \
+  --module-address 0xModule... \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+The operation is idempotent. New and replacement modules created by the current factory already
+scope the configured service registry automatically.
+
 Move nodes to a new safe/module pair:
 
 ```bash

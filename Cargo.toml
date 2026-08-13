@@ -22,7 +22,7 @@ allocator-mimalloc = [
 default = []
 
 [dependencies]
-alloy-transport-http = { version = "2.0.4", features = ["reqwest-default-tls"] }
+alloy-transport-http = { version = "2.4.1", features = ["reqwest-default-tls"] }
 anyhow = "1.0.103"
 clap = { version = "4.6.1", features = ["derive", "env", "string"] }
 hex = "0.4.3"
@@ -47,8 +47,8 @@ tracing-subscriber = { version = "0.3.20", features = [
 url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.4" }
 
-hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "6ce45eb5e7d433545d82ea32e27562eb0fc329c3" }
-hopr-types = { git = "https://github.com/hoprnet/hopr-types", rev = "2a3bb391f1f98475d033b105c69090d050aaff0c", features = [
+hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "0eea1981c67343e65ff4e5ecb0b81b9ddc201b14" }
+hopr-types = { git = "https://github.com/hoprnet/hopr-types", rev = "68d626ba041da06fde90c9c3c51a4d53c5ab0c4c", features = [
   "chain",
   "crypto",
   "internal",
