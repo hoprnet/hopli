@@ -2778,8 +2778,8 @@ dependencies = [
 
 [[package]]
 name = "hopr-types"
-version = "2.3.0"
-source = "git+https://github.com/hoprnet/hopr-types?rev=68d626ba041da06fde90c9c3c51a4d53c5ab0c4c#68d626ba041da06fde90c9c3c51a4d53c5ab0c4c"
+version = "2.4.0"
+source = "git+https://github.com/hoprnet/hopr-types?rev=47f3f1b80d9aa3fbb4d6adc73d7fde3dbd84e3cb#47f3f1b80d9aa3fbb4d6adc73d7fde3dbd84e3cb"
 dependencies = [
  "aes",
  "anyhow",
