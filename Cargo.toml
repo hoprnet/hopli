@@ -48,7 +48,7 @@ url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.4" }
 
 hopr-bindings = { git = "https://github.com/hoprnet/contracts", rev = "0eea1981c67343e65ff4e5ecb0b81b9ddc201b14" }
-hopr-types = { git = "https://github.com/hoprnet/hopr-types", rev = "68d626ba041da06fde90c9c3c51a4d53c5ab0c4c", features = [
+hopr-types = { git = "https://github.com/hoprnet/hopr-types", rev = "47f3f1b80d9aa3fbb4d6adc73d7fde3dbd84e3cb", features = [
   "chain",
   "crypto",
   "internal",
