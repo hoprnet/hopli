@@ -22,30 +22,30 @@ allocator-mimalloc = [
 default = []
 
 [dependencies]
-alloy-transport-http = { version = "2.0.4", features = ["reqwest-default-tls"] }
-anyhow = "1.0.103"
-clap = { version = "4.6.1", features = ["derive", "env", "string"] }
+alloy-transport-http = { version = "2.4.1", features = ["reqwest-default-tls"] }
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive", "env", "string"] }
 hex = "0.4.3"
 hex-literal = "1.1.0"
 lazy_static = "1.5.0"
 rpassword = "7.5.4"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-thiserror = "2.0.17"
-tokio = { version = "1.48.0", features = [
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = [
   "macros",
   "rt-multi-thread",
   "tracing",
 ] }
-tracing = { version = "0.1.43" }
-tracing-subscriber = { version = "0.3.20", features = [
+tracing = { version = "0.1.44" }
+tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
   "fmt",
   "registry",
   "std",
 ] }
 url = { version = "2.5.8", features = ["serde"] }
-uuid = { version = "1.23.4" }
+uuid = { version = "1.24.1" }
 
 hopr-bindings = "4.13.0"
 hopr-types = { version = "2.3.0", features = [
@@ -68,10 +68,10 @@ tempfile   = "3.27.0"
 
 # Target-specific dependencies for memory allocators
 [target.'cfg(target_os = "linux")'.dependencies]
-mimalloc = { version = "0.1.48", default-features = false, optional = true, features = [
+mimalloc = { version = "0.1.52", default-features = false, optional = true, features = [
   "secure",
 ] }
-tikv-jemallocator = { version = "0.6.1", optional = true }
+tikv-jemallocator = { version = "0.7.0", optional = true }
 
 [profile.dev]
 panic = "abort"
