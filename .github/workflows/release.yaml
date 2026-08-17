@@ -34,7 +34,7 @@ jobs:
           - architecture: aarch64-darwin
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b4ee9597f2c47f62fbc2c989a4af36fc4abf2f6f # build-binaries-v3
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@475421441ff5747c2233ebe58cdff355c8b40356 # build-binaries-v3
     permissions:
       contents: read
       id-token: write
@@ -90,7 +90,7 @@ jobs:
       id-token: write
     steps:
       - name: Release version
-        uses: hoprnet/hopr-workflows/actions/release-version@9c452ef512e6a7d5119125af9fc1aa45591a632f # release-version-v5
+        uses: hoprnet/hopr-workflows/actions/release-version@711c81d05909e2482d74289084502fb70fecc97b # release-version-v5
         env:
           PRE_COMMIT_ALLOW_NO_CONFIG: "1"
         with:
