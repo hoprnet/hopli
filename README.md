@@ -129,6 +129,15 @@ Convert peer ID/public key:
 hopli identity convert-peer --peer-or-key 16Uiu2HAm...
 ```
 
+Check and migrate identities to the latest keystore format:
+
+```bash
+hopli identity migrate \
+  --identity-directory ./identities \
+  --identity-prefix node_ \
+  --password-path ./secrets/identity.pwd
+```
+
 ### 2. Faucet funding
 
 Fund identities and/or explicit addresses:

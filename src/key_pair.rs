@@ -81,6 +81,34 @@ pub fn read_identities(files: Vec<PathBuf>, password: &str) -> Result<HashMap<St
     Ok(results)
 }
 
+/// Check whether an identity file needs a keystore-format migration, migrate it in place if so,
+/// and verify the migration preserved the public keys. Returns whether a migration was performed.
+pub fn migrate_identity(file: &Path, password: &str) -> Result<bool, HelperErrors> {
+    let file_str = file
+        .to_str()
+        .ok_or(HelperErrors::IncorrectFilename(file.to_string_lossy().to_string()))?;
+
+    let (before, needs_migration) =
+        HoprKeys::read_eth_keystore(file_str, password).map_err(|_| HelperErrors::UnableToReadIdentity)?;
+
+    if !needs_migration {
+        return Ok(false);
+    }
+
+    before
+        .write_eth_keystore(file_str, password)
+        .map_err(HelperErrors::KeyStoreError)?;
+
+    let (after, still_needs_migration) =
+        HoprKeys::read_eth_keystore(file_str, password).map_err(|_| HelperErrors::UnableToReadIdentity)?;
+
+    if still_needs_migration || before != after {
+        return Err(HelperErrors::MigrationVerificationFailed(file_str.to_string()));
+    }
+
+    Ok(true)
+}
+
 /// encrypt HoprKeys with a new password to an identity file
 pub fn update_identity_password(
     keys: HoprKeys,
@@ -536,6 +564,61 @@ mod tests {
             read_id.chain_key.public().to_address(),
             address,
             "cannot use the new password to read files"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_identity_not_needed_for_current_format() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let path = tmp.path().to_str().context("should produce a valid tmp path string")?;
+        let pwd = "password";
+        let (_, created_id) = create_identity(path, pwd, &None)?;
+
+        let files = get_files(path, &None);
+        assert_eq!(files.len(), 1, "must have one identity file");
+
+        assert!(
+            !migrate_identity(files[0].as_path(), pwd)?,
+            "current-format identity should not need migration"
+        );
+
+        // re-reading must still yield the same keys
+        let (_, read_id) = read_identity(files[0].as_path(), pwd)?;
+        assert_eq!(
+            read_id.chain_key.public().to_address(),
+            created_id.chain_key.public().to_address()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_identity_migrates_legacy_keystore() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let path = tmp.path().join("legacy.id");
+        let pwd = "local";
+
+        // V1 raw-private-key keystore fixture, taken from hopr-types' own `test_auto_migration` test
+        let legacy_keystore = r#"{"id":"8e5fe142-6ef9-4fbb-aae8-5de32b680e31","version":3,"crypto":{"cipher":"aes-128-ctr","cipherparams":{"iv":"04141354edb9dfb0c65e6905a3a0b9dd"},"ciphertext":"74f12f72cf2d3d73ff09f783cb9b57995b3808f7d3f71aa1fa1968696aedfbdd","kdf":"scrypt","kdfparams":{"salt":"f5e3f04eaa0c9efffcb5168c6735d7e1fe4d96f48a636c4f00107e7c34722f45","n":1,"dklen":32,"p":1,"r":8},"mac":"d0daf0e5d14a2841f0f7221014d805addfb7609d85329d4c6424a098e50b6fbe"}}"#;
+        fs::write(&path, legacy_keystore.as_bytes())?;
+
+        assert!(migrate_identity(&path, pwd)?, "legacy keystore should need migration");
+
+        let (migrated, still_needs_migration) =
+            HoprKeys::read_eth_keystore(path.to_str().context("should produce a valid tmp path string")?, pwd)?;
+        assert!(
+            !still_needs_migration,
+            "re-read after migration must not need further migration"
+        );
+        assert_eq!(
+            migrated.chain_key.public().to_address().to_string(),
+            "0x826a1bf3d51fa7f402a1e01d1b2c8a8bac28e666"
+        );
+
+        // running migration again on the now-current-format file is a no-op
+        assert!(
+            !migrate_identity(&path, pwd)?,
+            "already-migrated identity should not need migration again"
         );
         Ok(())
     }

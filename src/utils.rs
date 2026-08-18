@@ -76,6 +76,10 @@ pub enum HelperErrors {
     #[error("unable to update identity password")]
     UnableToUpdateIdentityPassword,
 
+    /// Migration re-read still needs migration, or public keys changed unexpectedly
+    #[error("migration of identity file {0} did not fully complete or keys changed unexpectedly")]
+    MigrationVerificationFailed(String),
+
     /// Error due to supplying a non-existing file name
     #[error("incorrect filename: {0}")]
     IncorrectFilename(String),

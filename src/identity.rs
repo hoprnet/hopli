@@ -34,6 +34,14 @@
 //!     --password-path "./test/pwd" \
 //!     --new-password-path "./test/newpwd"
 //! ```
+//!
+//! - To check and migrate identities to the latest keystore format
+//! ```text
+//! hopli identity migrate \
+//!     --identity-directory "./test" \
+//!     --identity-prefix node_ \
+//!     --password-path "./test/pwd"
+//! ```
 use std::{collections::HashMap, str::FromStr};
 
 use clap::{Parser, builder::RangedU64ValueParser};
@@ -49,8 +57,8 @@ use tracing::{debug, info};
 
 use crate::{
     key_pair::{
-        ArgEnvReader, IdentityFileArgs, NewPasswordArgs, create_identity, read_identities, read_identity,
-        update_identity_password,
+        ArgEnvReader, IdentityFileArgs, NewPasswordArgs, create_identity, migrate_identity, read_identities,
+        read_identity, update_identity_password,
     },
     utils::{Cmd, HelperErrors, HelperErrors::UnableToParseAddress},
 };
@@ -94,6 +102,14 @@ pub enum IdentitySubcommands {
         /// New password
         #[command(flatten)]
         new_password: NewPasswordArgs,
+    },
+
+    /// Check identity files for pending keystore-format migrations and migrate them in place
+    #[command(visible_alias = "mg")]
+    Migrate {
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
     },
 
     /// Converts PeerId from base58 to public key as hex or vice-versa
@@ -207,6 +223,28 @@ impl IdentitySubcommands {
         info!("Updated password for {:?} identity files", files.len());
         Ok(())
     }
+
+    /// check identity files for pending keystore-format migrations and migrate them in place
+    fn execute_identity_migration(local_identity: IdentityFileArgs) -> Result<(), HelperErrors> {
+        // check if password is provided
+        let pwd = local_identity.clone().password.read_default()?;
+
+        // read ids
+        let files = local_identity.get_files()?;
+        debug!("Identities read {:?}", files.len());
+
+        for file in &files {
+            let migrated = migrate_identity(file, &pwd)?;
+            println!(
+                "{}: {}",
+                file.display(),
+                if migrated { "migrated" } else { "up to date" }
+            );
+        }
+
+        info!("Checked {:?} identity files for migration", files.len());
+        Ok(())
+    }
 }
 
 impl Cmd for IdentitySubcommands {
@@ -223,6 +261,9 @@ impl Cmd for IdentitySubcommands {
                 local_identity,
                 new_password,
             } => IdentitySubcommands::execute_identity_update(local_identity, new_password),
+            IdentitySubcommands::Migrate { local_identity } => {
+                IdentitySubcommands::execute_identity_migration(local_identity)
+            }
             IdentitySubcommands::ConvertPeer { peer_or_key } => {
                 let peer_or_key = peer_or_key.peer_or_key;
                 if peer_or_key.to_lowercase().starts_with("0x") {
