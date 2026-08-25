@@ -7,6 +7,7 @@
 - identity file creation and maintenance
 - node funding (native and HOPR tokens)
 - Safe + module setup and migration
+- service registry entries and service types
 - winning-probability contract operations
 
 ## Build
@@ -50,6 +51,12 @@ You can also set:
 export HOPLI_CONTRACTS_ROOT=/path/to/contracts
 ```
 
+The `contracts-addresses.json` schema now includes a `service_registry` address for every network.
+A `--contracts-root` or `HOPLI_CONTRACTS_ROOT` that points at a contracts checkout from before the
+service registry therefore fails to load, with a deserialization error naming the missing field.
+Point it at a current checkout, add the field (the zero address means "not deployed on this
+network"), or drop the flag and use the embedded configuration.
+
 ### Identity input
 
 Commands that operate on identities accept either:
@@ -82,6 +89,7 @@ Subcommands:
 - `hopli identity` (`id`)
 - `hopli faucet`
 - `hopli safe-module` (`sm`)
+- `hopli service` (`svc`)
 - `hopli win-prob` (`wp`)
 
 Use `--help` at any level for details, for example:
@@ -200,6 +208,20 @@ hopli safe-module add-node \
   --private-key <PRIVATE_KEY>
 ```
 
+Scope the current network's service registry on a module created before service-registry support:
+
+```bash
+hopli safe-module add-service-registry-target \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --safe-address 0xSafe... \
+  --module-address 0xModule... \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+The operation is idempotent. New and replacement modules created by the current factory already
+scope the configured service registry automatically.
+
 Move nodes to a new safe/module pair:
 
 ```bash
@@ -238,6 +260,101 @@ Convert from `f64` to contract encoding:
 ```bash
 hopli win-prob convert --winning-probability 0.5
 ```
+
+### 5. Service registry
+
+Entry writes go through the Safe bound to the node, because the registry only accepts that Safe as
+the sender. `--private-key` is therefore the key of a Safe **owner**, not of the node, and
+`--safe-address` is only needed when the binding cannot be read from the node-safe registry.
+Registering and updating cost the service type's burn in wxHOPR, which the Safe must hold; `hopli`
+puts an approval for exactly that burn in front of the call, in the same Safe transaction.
+
+Register a node under a service type:
+
+```bash
+hopli service register \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit \
+  --node-address 0xNode... \
+  --metadata '{"endpoint":"https://exit.example"}' \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+Replace the metadata of an entry, reading it from a file (the only way to pass bytes that are not
+valid UTF-8):
+
+```bash
+hopli service update \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit \
+  --node-address 0xNode... \
+  --metadata-file ./metadata.json \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+Remove an entry. This is free and never gated by the type's policy:
+
+```bash
+hopli service deregister \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit \
+  --node-address 0xNode... \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+Read a single entry, list the entries of a type, or list the registered types. Both list commands
+read every page at one block, because the registry's list order changes as entries are removed:
+
+```bash
+hopli service get   --network anvil-localhost --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit --node-address 0xNode...
+hopli service list  --network anvil-localhost --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit
+hopli service types --network anvil-localhost --provider-url http://127.0.0.1:8545
+```
+
+Claim a service type. The caller pays the global registration fee and becomes the type owner:
+
+```bash
+hopli service register-type \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --service-type gvpn:exit \
+  --registration-burn 1 \
+  --update-burn 0.5 \
+  --private-key <PRIVATE_KEY>
+```
+
+As the type owner, change the requirement contract or the burns:
+
+```bash
+hopli service set-requirement --service-type gvpn:exit --requirement 0xGate... ...
+hopli service set-registration-burn --service-type gvpn:exit --amount 2 ...
+hopli service set-update-burn --service-type gvpn:exit --amount 1 ...
+```
+
+Hand the type to another owner. Transfers are irreversible, so abandoning a type needs the
+explicit `--abandon` flag rather than a zero `--new-owner`:
+
+```bash
+hopli service transfer-type-ownership --service-type gvpn:exit --new-owner 0xNewOwner... ...
+hopli service transfer-type-ownership --service-type gvpn:exit --abandon ...
+```
+
+Manager and admin operations:
+
+```bash
+hopli service set-fee --amount 5 ...
+hopli service set-node-safe-registry --node-safe-registry 0xNew... \
+  --probe-node 0xNode... --expected-safe 0xSafe... ...
+hopli service recover-tokens --token 0xToken... --recipient 0xTo... ...
+```
+
+Commands fail with a "contract not deployed" error on networks where `service_registry` is the
+zero address.
 
 ## Development
 

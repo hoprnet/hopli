@@ -169,11 +169,12 @@ use crate::{
     environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
-        SafeSingleton, add_new_network_target_to_module, check_safe_setup, create_new_module_and_include_nodes,
-        create_new_module_include_nodes_and_remove_old_module, debug_node_safe_module_setup_main,
-        debug_node_safe_module_setup_on_balance_and_registries, deploy_safe_module_with_targets_and_nodes,
-        deregister_nodes_from_node_safe_registry_and_remove_from_module, fill_node_registry_status,
-        include_nodes_to_module, migrate_nodes, transfer_native_tokens, transfer_or_mint_tokens,
+        SafeSingleton, add_new_network_target_to_module, add_service_registry_target_to_module, check_safe_setup,
+        create_new_module_and_include_nodes, create_new_module_include_nodes_and_remove_old_module,
+        debug_node_safe_module_setup_main, debug_node_safe_module_setup_on_balance_and_registries,
+        deploy_safe_module_with_targets_and_nodes, deregister_nodes_from_node_safe_registry_and_remove_from_module,
+        fill_node_registry_status, include_nodes_to_module, migrate_nodes, transfer_native_tokens,
+        transfer_or_mint_tokens,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -471,6 +472,26 @@ pub enum SafeModuleSubcommands {
 
         /// Access to the private key, of which the wallet either contains sufficient assets
         /// as the source of funds or it can mint necessary tokens
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Scope the current network's service registry on an existing module
+    #[command(visible_alias = "asr")]
+    AddServiceRegistryTarget {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Safe that owns the node-management module
+        #[clap(help = "Safe address that owns the module", long, short = 's')]
+        safe_address: String,
+
+        /// HOPR node-management module address
+        #[clap(help = "HOPR node-management module address", long, short = 'm')]
+        module_address: String,
+
+        /// Access to the private key of a Safe owner
         #[command(flatten)]
         private_key: PrivateKeyArgs,
     },
@@ -1057,6 +1078,38 @@ impl SafeModuleSubcommands {
         Ok(())
     }
 
+    /// Scope the configured service registry on an existing module through its owning Safe.
+    pub async fn execute_add_service_registry_target(
+        network_provider: NetworkProviderArgs,
+        safe_address: String,
+        module_address: String,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        let safe_addr = Address::from_str(&safe_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
+        let module_addr = Address::from_str(&module_address)
+            .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
+
+        let signer_private_key = private_key.read_default()?;
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+        let service_registry = contract_addresses.addresses.service_registry;
+        if service_registry.is_zero() {
+            return Err(HelperErrors::ContractNotDeployed(format!(
+                "HoprServiceRegistry is not deployed on network {}",
+                network_provider.network
+            )));
+        }
+
+        add_service_registry_target_to_module(
+            SafeSingleton::new(safe_addr, rpc_provider),
+            module_addr,
+            service_registry,
+            signer_private_key,
+        )
+        .await
+    }
+
     /// Execute the command which inspects a Safe and reports its setup,
     /// attached HOPR module, linked nodes, and the matching network configuration.
     pub async fn execute_safe_module_check_safe(
@@ -1129,6 +1182,7 @@ impl SafeModuleSubcommands {
                 let mut found_channels: Option<(Address, Vec<&str>)> = None;
                 let mut found_announcement: Option<(Address, Vec<&str>)> = None;
                 let mut found_token: Option<(Address, Vec<&str>)> = None;
+                let mut found_service_registry: Option<(Address, Vec<&str>)> = None;
                 let mut unknowns: Vec<(Address, u8)> = Vec::new();
 
                 for (addr, ty) in &m.targets {
@@ -1144,6 +1198,13 @@ impl SafeModuleSubcommands {
                         .iter()
                         .filter_map(|(n, c)| (c.addresses.token == *addr).then_some(n.as_str()))
                         .collect();
+                    let svc: Vec<&str> = candidates
+                        .iter()
+                        .filter_map(|(n, c)| {
+                            (!c.addresses.service_registry.is_zero() && c.addresses.service_registry == *addr)
+                                .then_some(n.as_str())
+                        })
+                        .collect();
 
                     if !ch.is_empty() {
                         found_channels = Some((*addr, ch));
@@ -1151,6 +1212,8 @@ impl SafeModuleSubcommands {
                         found_announcement = Some((*addr, ann));
                     } else if !tok.is_empty() {
                         found_token = Some((*addr, tok));
+                    } else if !svc.is_empty() {
+                        found_service_registry = Some((*addr, svc));
                     } else {
                         unknowns.push((*addr, *ty));
                     }
@@ -1178,6 +1241,33 @@ impl SafeModuleSubcommands {
 
                 if let Some((a, _)) = &found_token {
                     info!("  wxHOPR token target scoped: {:?}", a);
+                }
+                match (&found_service_registry, channels_nets) {
+                    (Some((a, svc)), Some(ch)) if svc.iter().any(|network| ch.contains(network)) => {
+                        info!("  service registry target scoped: {:?}", a);
+                    }
+                    (Some((a, svc)), _) => warn!(
+                        "  service registry target {:?} points to a DIFFERENT network ({}) than channels",
+                        a,
+                        svc.join(", ")
+                    ),
+                    (None, Some(ch)) => {
+                        let expected: Vec<_> = candidates
+                            .iter()
+                            .filter(|(name, config)| {
+                                ch.contains(&name.as_str()) && !config.addresses.service_registry.is_zero()
+                            })
+                            .map(|(name, config)| (name.as_str(), config.addresses.service_registry))
+                            .collect();
+                        if !expected.is_empty() {
+                            warn!(
+                                "  service registry target not set — run `safe-module add-service-registry-target` \
+                                 ({:?})",
+                                expected
+                            );
+                        }
+                    }
+                    (None, None) => {}
                 }
                 for (a, ty) in &unknowns {
                     warn!("  unrecognised target {:?} (target_type byte {:#04x})", a, ty);
@@ -1402,6 +1492,20 @@ impl Cmd for SafeModuleSubcommands {
                 private_key,
             } => {
                 SafeModuleSubcommands::execute_safe_create_add_new_target(
+                    network_provider,
+                    safe_address,
+                    module_address,
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::AddServiceRegistryTarget {
+                network_provider,
+                safe_address,
+                module_address,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_add_service_registry_target(
                     network_provider,
                     safe_address,
                     module_address,

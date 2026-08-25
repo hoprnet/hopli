@@ -34,7 +34,7 @@ use hopr_bindings::{
     },
     hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
-        removeNodeCall, scopeTargetTokenCall,
+        removeNodeCall, scopeTargetServiceRegistryCall, scopeTargetTokenCall,
     },
     hopr_node_safe_migration::HoprNodeSafeMigration::{
         deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
@@ -1205,6 +1205,62 @@ pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
     .await?;
 
     Ok(())
+}
+
+/// Scope a service registry on an existing node-management module.
+///
+/// New modules receive the current registry from `HoprNodeStakeFactory` during initialization.
+/// This operation is for modules that predate that configuration. It is deliberately idempotent:
+/// the module rejects duplicate targets, so checking first lets operators safely rerun Hopli after
+/// an interrupted migration.
+pub async fn add_service_registry_target_to_module<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    module_address: Address,
+    service_registry_address: Address,
+    owner_chain_key: ChainKeypair,
+) -> Result<(), HelperErrors> {
+    if service_registry_address.is_zero() {
+        return Err(HelperErrors::ContractNotDeployed(
+            "HoprServiceRegistry address is zero".into(),
+        ));
+    }
+
+    let module = HoprNodeManagementModuleInstance::new(module_address, safe.provider().clone());
+    let current = module
+        .tryGetTarget(service_registry_address)
+        .call()
+        .await
+        .map_err(|e| {
+            HelperErrors::MiddlewareError(format!(
+                "cannot inspect the service-registry target; the module may need to be upgraded or replaced: {e}"
+            ))
+        })?;
+    if current._0 {
+        info!(%module_address, %service_registry_address, "service registry target is already scoped");
+        return Ok(());
+    }
+
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+    let multisend_txns = vec![MultisendTransaction {
+        encoded_data: scopeTargetServiceRegistryCall {
+            serviceRegistry: service_registry_address,
+        }
+        .abi_encode()
+        .into(),
+        tx_operation: SafeTxOperation::Call,
+        to: module_address,
+        value: U256::ZERO,
+    }];
+
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key,
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await
 }
 
 /// Quick check if the following values are correct, for one single node:
@@ -2504,6 +2560,35 @@ mod tests {
                 .any(|(addr, _)| addr == instances.channels.address()),
             "channels should be a scoped target"
         );
+        assert!(
+            hopr_module
+                .targets
+                .iter()
+                .any(|(addr, _)| addr == instances.service_registry.address()),
+            "new modules should automatically scope the configured service registry"
+        );
+
+        // Exercise the compatibility operation with an address that was not part of module
+        // initialization. This models adding a registry to an existing module. Calling it twice
+        // proves the preflight check makes retries idempotent.
+        let additional_registry = *instances.safe_registry.address();
+        assert!(
+            !node_module.tryGetTarget(additional_registry).call().await?._0,
+            "the compatibility target should start unscoped"
+        );
+        add_service_registry_target_to_module(
+            safe.clone(),
+            *node_module.address(),
+            additional_registry,
+            contract_deployer.clone(),
+        )
+        .await?;
+        assert!(
+            node_module.tryGetTarget(additional_registry).call().await?._0,
+            "the compatibility operation should scope the target"
+        );
+        add_service_registry_target_to_module(safe, *node_module.address(), additional_registry, contract_deployer)
+            .await?;
 
         Ok(())
     }

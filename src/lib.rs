@@ -5,6 +5,7 @@
 //! - `identity`: create/read/update node identity files
 //! - `faucet`: distribute native/HOPR tokens to nodes
 //! - `safe_module`: create and operate Safe + module setups
+//! - `service`: read and write the on-chain registry of node services
 //! - `win_prob`: manage winning probability parameters
 
 pub mod environment_config;
@@ -14,6 +15,7 @@ pub mod key_pair;
 pub mod methods;
 pub mod payloads;
 pub mod safe_module;
+pub mod service;
 #[allow(clippy::too_many_arguments)]
 pub mod utils;
 pub mod win_prob;

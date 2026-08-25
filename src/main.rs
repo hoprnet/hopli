@@ -5,6 +5,7 @@ use hopli_lib::{
     faucet::FaucetArgs,
     identity::IdentitySubcommands,
     safe_module::SafeModuleSubcommands,
+    service::ServiceSubcommands,
     utils::{Cmd, HelperErrors},
     win_prob::WinProbSubcommands,
 };
@@ -50,6 +51,13 @@ enum Commands {
         command: SafeModuleSubcommands,
     },
 
+    /// Read and write the on-chain registry of the services that HOPR nodes offer
+    #[command(visible_alias = "svc")]
+    Service {
+        #[command(subcommand)]
+        command: ServiceSubcommands,
+    },
+
     /// Commands around winning probability
     #[command(visible_alias = "wp")]
     WinProb {
@@ -82,6 +90,9 @@ async fn main() -> Result<(), HelperErrors> {
             opt.async_run().await?;
         }
         Commands::SafeModule { command } => {
+            command.async_run().await?;
+        }
+        Commands::Service { command } => {
             command.async_run().await?;
         }
         Commands::WinProb { command } => {
