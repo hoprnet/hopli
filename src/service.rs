@@ -1750,6 +1750,7 @@ mod tests {
     async fn test_service_entry_lifecycle_through_the_bound_safe() -> anyhow::Result<()> {
         let _ = env_logger::builder().is_test(true).try_init();
 
+        let service_type = parse_service_type("hopli:test").map_err(anyhow::Error::msg)?;
         let registration_burn = U256::from(2_000_000_000_000_000_000u64); // 2 wxHOPR
         let update_burn = U256::from(1_000_000_000_000_000_000u64); // 1 wxHOPR
 
@@ -1819,7 +1820,7 @@ mod tests {
         // claim an open service type with non-zero burns, paying the global registration fee
         ServiceSubcommands::execute_register_type(
             network_provider.clone(),
-            ServiceType::GVPN_EXIT,
+            service_type,
             Address::ZERO,
             registration_burn,
             update_burn,
@@ -1827,17 +1828,27 @@ mod tests {
         )
         .await?;
 
+        let service_types =
+            ServiceSubcommands::execute_list_types(network_provider.clone(), PaginationArgs::default()).await?;
         assert_eq!(
-            ServiceSubcommands::execute_list_types(network_provider.clone(), PaginationArgs::default()).await?,
-            vec![ServiceType::GVPN_EXIT],
-            "the claimed type should be the only registered one"
+            service_types.len(),
+            2,
+            "the default and test types should be registered"
+        );
+        assert!(
+            service_types.contains(&ServiceType::GVPN_EXIT),
+            "the default gvpn:exit type should remain registered"
+        );
+        assert!(
+            service_types.contains(&service_type),
+            "the test type should be registered"
         );
 
         // register the entry through the safe
         let metadata = ServiceMetadata::try_from(br#"{"endpoint":"https://exit.example"}"#.to_vec())?;
         ServiceSubcommands::execute_register(
             network_provider.clone(),
-            ServiceType::GVPN_EXIT,
+            service_type,
             node,
             None,
             metadata.clone(),
@@ -1845,7 +1856,7 @@ mod tests {
         )
         .await?;
 
-        let entry = ServiceSubcommands::execute_get_entry(network_provider.clone(), ServiceType::GVPN_EXIT, node)
+        let entry = ServiceSubcommands::execute_get_entry(network_provider.clone(), service_type, node)
             .await?
             .expect("the entry should exist after registering");
         assert_eq!(entry.metadata.to_vec(), metadata.as_ref(), "metadata should round trip");
@@ -1876,16 +1887,13 @@ mod tests {
         assert_eq!(registered.len(), 1, "one Registered event should have been emitted");
         assert_eq!(registered[0].0.node, node);
         assert_eq!(registered[0].0.safe, *safe.address());
-        assert_eq!(registered[0].0.serviceType, service_type_id(&ServiceType::GVPN_EXIT));
+        assert_eq!(registered[0].0.serviceType, service_type_id(&service_type));
         assert_eq!(registered[0].0.metadata.to_vec(), metadata.as_ref());
         assert_eq!(registered[0].0.burned, registration_burn);
 
-        let listed = ServiceSubcommands::execute_list_entries(
-            network_provider.clone(),
-            ServiceType::GVPN_EXIT,
-            PaginationArgs::default(),
-        )
-        .await?;
+        let listed =
+            ServiceSubcommands::execute_list_entries(network_provider.clone(), service_type, PaginationArgs::default())
+                .await?;
         assert_eq!(listed.len(), 1, "the type should list exactly the one entry");
         assert_eq!(listed[0].0, node);
         assert_eq!(listed[0].1.metadata.to_vec(), metadata.as_ref());
@@ -1894,7 +1902,7 @@ mod tests {
         let new_metadata = ServiceMetadata::try_from(br#"{"endpoint":"https://exit2.example"}"#.to_vec())?;
         ServiceSubcommands::execute_update(
             network_provider.clone(),
-            ServiceType::GVPN_EXIT,
+            service_type,
             node,
             None,
             new_metadata.clone(),
@@ -1902,7 +1910,7 @@ mod tests {
         )
         .await?;
 
-        let updated = ServiceSubcommands::execute_get_entry(network_provider.clone(), ServiceType::GVPN_EXIT, node)
+        let updated = ServiceSubcommands::execute_get_entry(network_provider.clone(), service_type, node)
             .await?
             .expect("the entry should still exist after updating");
         assert_eq!(
@@ -1932,29 +1940,19 @@ mod tests {
             token.balanceOf(*safe.address()).call().await?.is_zero(),
             "the safe should have spent all of its wxHOPR on the burns"
         );
-        ServiceSubcommands::execute_deregister(
-            network_provider.clone(),
-            ServiceType::GVPN_EXIT,
-            node,
-            None,
-            private_key.clone(),
-        )
-        .await?;
+        ServiceSubcommands::execute_deregister(network_provider.clone(), service_type, node, None, private_key.clone())
+            .await?;
 
         assert!(
-            ServiceSubcommands::execute_get_entry(network_provider.clone(), ServiceType::GVPN_EXIT, node)
+            ServiceSubcommands::execute_get_entry(network_provider.clone(), service_type, node)
                 .await?
                 .is_none(),
             "the entry should be gone after deregistering"
         );
         assert!(
-            ServiceSubcommands::execute_list_entries(
-                network_provider.clone(),
-                ServiceType::GVPN_EXIT,
-                PaginationArgs::default()
-            )
-            .await?
-            .is_empty(),
+            ServiceSubcommands::execute_list_entries(network_provider.clone(), service_type, PaginationArgs::default())
+                .await?
+                .is_empty(),
             "the type should list no entries after deregistering"
         );
 
