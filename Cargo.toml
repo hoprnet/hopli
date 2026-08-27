@@ -48,7 +48,7 @@ url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.4" }
 
 hopr-bindings = { version = "5.0.0" }
-hopr-types = { version = "3.1.0", features = [
+hopr-types = { version = "4.0.0", features = [
   "chain",
   "crypto",
   "internal",
