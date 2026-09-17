@@ -2,6 +2,8 @@
   builders,
   src,
   depsSrc,
+  testSrc,
+  foundry-bin,
   rev,
   buildPlatform,
   nixLib,
@@ -21,6 +23,15 @@ in
 {
   hopli = builders.local.callPackage nixLib.mkRustPackage hopliBuildArgs;
   inherit hopli-dev;
+
+  test = builders.local.callPackage nixLib.mkRustPackage (
+    hopliBuildArgs
+    // {
+      src = testSrc;
+      runTests = true;
+      extraNativeBuildInputs = [ foundry-bin ];
+    }
+  );
 
   hopli-clippy = builders.local.callPackage nixLib.mkRustPackage (
     hopliBuildArgs // { runClippy = true; }
