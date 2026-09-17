@@ -109,10 +109,12 @@
               builders
               src
               depsSrc
+              testSrc
               rev
               buildPlatform
               nixLib
               ;
+            foundry-bin = pkgs.foundry-bin;
           };
 
           dockerEnv = [
