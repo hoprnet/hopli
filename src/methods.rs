@@ -17,31 +17,19 @@ use hopr_bindings::{
         DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
         ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
         SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
-    },
-    exports::alloy::{
-        network::{EthereumWallet, TransactionBuilder},
-        primitives::{Address, B256, Bytes, U256, keccak256, utils::format_units},
-        providers::{
+    }, exports::alloy::{
+        network::{EthereumWallet, TransactionBuilder}, primitives::{Address, B256, Bytes, U256, keccak256, utils::{format_units, parse_units}}, providers::{
             CallInfoTrait, CallItem, Identity, MULTICALL3_ADDRESS, MulticallBuilder, MulticallError, Provider,
             RootProvider, WalletProvider,
             bindings::IMulticall3::{Call3, aggregate3Call},
             fillers::*,
-        },
-        rpc::types::TransactionRequest,
-        signers::{Signer, local::PrivateKeySigner},
-        sol,
-        sol_types::{SolCall, SolValue},
-    },
-    hopr_node_management_module::HoprNodeManagementModule::{
+        }, rpc::types::TransactionRequest, signers::{Signer, local::PrivateKeySigner}, sol, sol_types::{SolCall, SolValue},
+    }, hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
         removeNodeCall, scopeTargetServiceRegistryCall, scopeTargetTokenCall,
-    },
-    hopr_node_safe_migration::HoprNodeSafeMigration::{
+    }, hopr_node_safe_migration::HoprNodeSafeMigration::{
         deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
-    },
-    hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
-    hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
-    hopr_token::HoprToken::{HoprTokenInstance, approveCall},
+    }, hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall}, hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall}, hopr_token::HoprToken::{HoprTokenInstance, approveCall},
 };
 use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
@@ -712,9 +700,11 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
 pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provider>(
     hopr_node_stake_factory: HoprNodeStakeFactoryInstance<Arc<P>>,
     hopr_channels_address: Address,
+    hopr_token_address: Address,
     node_addresses: Vec<Address>,
     admins: Vec<Address>,
     threshold: U256,
+    allowance: Option<f64>,
 ) -> Result<(SafeSingletonInstance<Arc<P>>, HoprNodeManagementModuleInstance<Arc<P>>), HelperErrors> {
     let caller = hopr_node_stake_factory.provider().default_signer_address();
     let provider = hopr_node_stake_factory.provider();
@@ -811,6 +801,29 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         info!("Nodes inclusion multicall payload is created");
     } else {
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
+    }
+
+    // use the allowance to approve the safe for token transfers if provided
+    if let Some(allowance_amount) = allowance {
+        let allowance_to_be_approved: U256 = parse_units(&allowance_amount.to_string(), "ether")
+            .map_err(|_| HelperErrors::ParseError("Failed to parse allowance amount units".into()))?
+            .into();
+
+        let approve_payload = approveCall {
+            spender: safe_address,
+            value: allowance_to_be_approved,
+        }
+        .abi_encode();
+
+        let multicall_payload_6 = prepare_safe_tx_multicall_payload_from_owner_contract(
+            safe_address,
+            hopr_token_address,
+            caller,
+            approve_payload,
+        );
+
+        multicall_payloads.push(multicall_payload_6.to_call3());
+        info!("Allowance approval multicall payload is created");
     }
 
     // renounce ownership granted to multicall so that only actual admins are included. Set the threshold.

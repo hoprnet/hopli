@@ -26,9 +26,9 @@
 //!     - if node is included in the module
 //!     - Get all the targets of the safe (then check if channel and announcement are there)
 //!     - Get the owner of the module
-//! - [SafeModuleSubcommands::Replace] replaces an old module with a new module (v4 compatible) and include nodes in the
-//!   new one.
-//! - [SafeModuleSubcommands::NewModule] creates a new module (v4 compatible) and adds nodes to the new module.
+//! - [SafeModuleSubcommands::Replace] only available for v4 and v5 networks (jura-* and piz-palu-*) and later.
+//!   It replaces an old module with a new module and include nodes in the new one.
+//! - [SafeModuleSubcommands::NewModule] creates a new module (v4, v5 compatible) and adds nodes to the new module.
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
 //! - [SafeModuleSubcommands::AddNode] adds an existing node identity to an already-deployed safe and module pair,
 //!   without creating new contracts or deregistering from a previous safe.
@@ -106,7 +106,7 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
-//! - Create a new module (v4 compatible) and adds nodes to the new module
+//! - Create a new module (compatible with the latest version) and adds nodes to the new module
 //! ```text
 //! hopli safe-module new-module \
 //!     --network anvil-localhost \
@@ -182,7 +182,7 @@ use crate::{
 /// CLI arguments for `hopli safe-module`
 #[derive(Clone, Debug, Parser)]
 pub enum SafeModuleSubcommands {
-    /// Create safe and module proxy if nothing exists
+    /// Create a safe and a module proxy for the HOPR node network
     #[command(visible_alias = "cr")]
     Create {
         /// Network name, contracts config file root, and customized provider, if available
@@ -558,9 +558,10 @@ impl SafeModuleSubcommands {
     ///
     /// 1. Create a safe instance and a node management module instance:
     /// 2. Set default permissions for the module
-    /// 3. Include node as a member with restricted permission on sending assets
+    /// 3. Include node as a member with default permission on sending assets
     /// 4. transfer some HOPR token to the new safe (directly)
     /// 5. transfer some native tokens to nodes
+    /// 6. approve allowance for the safe on the 
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_safe_module_creation(
         network_provider: NetworkProviderArgs,
@@ -568,6 +569,7 @@ impl SafeModuleSubcommands {
         node_address: Option<String>,
         admin_address: Option<String>,
         threshold: u32,
+        allowance: Option<f64>,
         hopr_amount: Option<f64>,
         native_amount: Option<f64>,
         private_key: PrivateKeyArgs,
@@ -622,9 +624,11 @@ impl SafeModuleSubcommands {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             hopr_stake_factory,
             contract_addresses.addresses.channels,
+            contract_addresses.addresses.token,
             node_eth_addresses.clone(),
             admin_eth_addresses,
             U256::from(threshold),
+            allowance,
         )
         .await?;
 
@@ -1383,6 +1387,7 @@ impl Cmd for SafeModuleSubcommands {
                     node_address,
                     admin_address,
                     threshold,
+                    allowance,
                     hopr_amount,
                     native_amount,
                     private_key,
@@ -1583,15 +1588,18 @@ mod tests {
 
         // capture the deployed contract addresses before the stake factory is moved into the deploy call
         let channels_addr = *instances.channels.address();
+        let token_addr = *instances.token.address();
         let contract_addresses = instances.get_contract_addresses();
 
         // deploy a safe + module with the deployer as owner and as the single node
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             channels_addr,
+            token_addr,
             vec![deployer_addr],
             vec![deployer_addr],
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -1675,9 +1683,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             vec![deployer_addr],
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -1779,9 +1789,11 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![deployer_addr],
             vec![deployer_addr],
             U256::from(1),
+            None
         )
         .await?;
 
@@ -1816,15 +1828,18 @@ mod tests {
 
         let deployer_addr = a2h(contract_deployer.public().to_address());
         let channels_addr = *instances.channels.address();
+        let token_addr = *instances.token.address();
         let contract_addresses = instances.get_contract_addresses();
 
         // deploy a safe + module with the deployer as the single node
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             channels_addr,
+            token_addr,
             vec![deployer_addr],
             vec![deployer_addr],
             U256::from(1),
+            None
         )
         .await?;
 
