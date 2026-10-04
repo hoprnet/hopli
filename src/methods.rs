@@ -803,14 +803,14 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
     }
 
-    // use the allowance to approve the safe for token transfers if provided
+    // Approve the channels contract to transfer tokens on behalf of the Safe if provided.
     if let Some(allowance_amount) = allowance {
         let allowance_to_be_approved: U256 = parse_units(&allowance_amount.to_string(), "ether")
             .map_err(|_| HelperErrors::ParseError("Failed to parse allowance amount units".into()))?
             .into();
 
         let approve_payload = approveCall {
-            spender: safe_address,
+            spender: hopr_channels_address,
             value: allowance_to_be_approved,
         }
         .abi_encode();
@@ -2110,9 +2110,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             node_addresses.clone(),
             admin_addresses.clone(),
             U256::from(2),
+            None,
         )
         .await?;
 
@@ -2156,6 +2158,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_deploy_safe_and_module_with_allowance() -> anyhow::Result<()> {
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client, anvil.addresses()[1]).await?;
+
+        // Expected values are in token base units (18 decimals), independent of the
+        // conversion used by the deployment helper. None preserves the factory default.
+        for (allowance, expected) in [
+            (None, 1_000_000_000_000_000_000_000_u128),
+            (Some(10.5), 10_500_000_000_000_000_000_u128),
+            (Some(2_000.0), 2_000_000_000_000_000_000_000_u128),
+            (Some(0.0), 0_u128),
+        ] {
+            let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+                Clone::clone(&instances.stake_factory),
+                *instances.channels.address(),
+                *instances.token.address(),
+                vec![anvil.addresses()[2]],
+                vec![anvil.addresses()[0], anvil.addresses()[1]],
+                U256::from(2),
+                allowance,
+            )
+            .await?;
+
+            let on_chain_allowance = instances
+                .token
+                .allowance(*safe.address(), *instances.channels.address())
+                .call()
+                .await?;
+            assert_eq!(
+                on_chain_allowance,
+                U256::from(expected),
+                "channels allowance should match the requested allowance {allowance:?}"
+            );
+            assert_eq!(
+                instances
+                    .token
+                    .allowance(*safe.address(), *safe.address())
+                    .call()
+                    .await?,
+                U256::ZERO,
+                "deployment should not approve the Safe itself as spender"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_safe_tx_via_multisend() -> anyhow::Result<()> {
         // set allowance for token transfer for the safe multiple times
         let _ = env_logger::builder().is_test(true).try_init();
@@ -2183,9 +2242,11 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             vec![a2h(contract_deployer.public().to_address())],
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2283,9 +2344,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             deployer_vec.clone(),
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2364,9 +2427,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2431,9 +2496,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2495,9 +2562,11 @@ mod tests {
         let (_safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2533,9 +2602,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             node_addresses.clone(),
             admin_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2630,9 +2701,11 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             deployer_vec.clone(),
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
