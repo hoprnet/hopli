@@ -2,7 +2,7 @@
 //! the `hopli` CLI.
 //!
 //! Main modules:
-//! - `channels`: query channels of nodes from Blokli
+//! - `channels`: query channels from Blokli and close them on behalf of the Safe
 //! - `identity`: create/read/update node identity files
 //! - `faucet`: distribute native/HOPR tokens to nodes
 //! - `safe_module`: create and operate Safe + module setups

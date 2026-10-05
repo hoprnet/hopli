@@ -1,6 +1,16 @@
-//! This module contains helpers to read the channels of HOPR nodes from a Blokli indexer,
-//! via [`blokli_client`]. Channels are identified by the Blokli key ids of their endpoints,
-//! which are resolved to chain addresses.
+//! This module contains helpers to close payment channels of HOPR nodes on behalf of their Safe.
+//!
+//! Channel information (status, source and destination of every channel) is read from a Blokli
+//! indexer via [`blokli_client`]. Closing channels is done on-chain, by the Safe that the node is
+//! registered with in the Node-Safe registry: the Safe owner signs one Safe transaction per batch,
+//! which bundles many `*Safe` calls to the HoprChannels contract via the Safe MultiSend contract.
+//!
+//! [`ChannelClosureAction`] maps each closure step to the HoprChannels function to call:
+//! - [`ChannelClosureAction::CloseIncoming`] -> `closeIncomingChannelSafe(selfAddress, source)`
+//! - [`ChannelClosureAction::InitiateOutgoingClosure`] -> `initiateOutgoingChannelClosureSafe(selfAddress,
+//!   destination)`
+//! - [`ChannelClosureAction::FinalizeOutgoingClosure`] -> `finalizeOutgoingChannelClosureSafe(selfAddress,
+//!   destination)`
 use std::{
     collections::{BTreeSet, HashMap},
     str::FromStr,
@@ -10,10 +20,30 @@ use blokli_client::{
     AccountSelector, BlokliClient, BlokliClientConfig, BlokliQueryClient, ChannelFilter, ChannelSelector, KeyId,
     types::ChannelStatus,
 };
-use hopr_bindings::exports::alloy::primitives::Address;
+use hopr_bindings::{
+    exports::alloy::{
+        primitives::{Address, B256, Bytes, keccak256},
+        sol_types::{SolCall, SolValue},
+    },
+    hopr_channels::HoprChannels::{
+        closeIncomingChannelSafeCall, finalizeOutgoingChannelClosureSafeCall, initiateOutgoingChannelClosureSafeCall,
+    },
+};
 use tracing::debug;
 
 use crate::utils::HelperErrors;
+
+/// On-chain value of `HoprChannelsType.ChannelStatus.CLOSED`
+pub const ONCHAIN_CHANNEL_STATUS_CLOSED: u8 = 0;
+/// On-chain value of `HoprChannelsType.ChannelStatus.OPEN`
+pub const ONCHAIN_CHANNEL_STATUS_OPEN: u8 = 1;
+/// On-chain value of `HoprChannelsType.ChannelStatus.PENDING_TO_CLOSE`
+pub const ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE: u8 = 2;
+
+/// Compute the id of the channel from `source` to `destination`, as `HoprChannels._getChannelId` does
+pub fn get_channel_id(source: Address, destination: Address) -> B256 {
+    keccak256((source, destination).abi_encode_packed())
+}
 
 /// Direction of a channel, seen from the node
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +52,75 @@ pub enum ChannelDirection {
     Incoming,
     /// The node is the source of the channel; the counterparty is the destination
     Outgoing,
+}
+
+/// One step of closing channels, executed by the Safe on behalf of the node
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelClosureAction {
+    /// Close an incoming channel immediately
+    CloseIncoming,
+    /// Start the notice period of an outgoing channel
+    InitiateOutgoingClosure,
+    /// Close an outgoing channel once the notice period has elapsed
+    FinalizeOutgoingClosure,
+}
+
+impl ChannelClosureAction {
+    /// Encode the HoprChannels call for the given node (`selfAddress`) and channel counterparty
+    pub fn encode(&self, node: Address, counterparty: Address) -> Bytes {
+        match self {
+            ChannelClosureAction::CloseIncoming => closeIncomingChannelSafeCall {
+                selfAddress: node,
+                source: counterparty,
+            }
+            .abi_encode(),
+            ChannelClosureAction::InitiateOutgoingClosure => initiateOutgoingChannelClosureSafeCall {
+                selfAddress: node,
+                destination: counterparty,
+            }
+            .abi_encode(),
+            ChannelClosureAction::FinalizeOutgoingClosure => finalizeOutgoingChannelClosureSafeCall {
+                selfAddress: node,
+                destination: counterparty,
+            }
+            .abi_encode(),
+        }
+        .into()
+    }
+
+    /// Source and destination of the channel affected by this action
+    pub fn channel_endpoints(&self, node: Address, counterparty: Address) -> (Address, Address) {
+        match self {
+            ChannelClosureAction::CloseIncoming => (counterparty, node),
+            ChannelClosureAction::InitiateOutgoingClosure | ChannelClosureAction::FinalizeOutgoingClosure => {
+                (node, counterparty)
+            }
+        }
+    }
+
+    /// Whether the action can be applied to a channel with the given on-chain status.
+    ///
+    /// Used to drop channels whose state indexed by Blokli is outdated, which would otherwise make
+    /// the whole batch revert.
+    pub fn accepts_onchain_status(&self, status: u8) -> bool {
+        match self {
+            ChannelClosureAction::CloseIncoming => {
+                status == ONCHAIN_CHANNEL_STATUS_OPEN || status == ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE
+            }
+            // initiating again on a PENDING_TO_CLOSE channel would push its closure time further out
+            ChannelClosureAction::InitiateOutgoingClosure => status == ONCHAIN_CHANNEL_STATUS_OPEN,
+            ChannelClosureAction::FinalizeOutgoingClosure => status == ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE,
+        }
+    }
+
+    /// Human-readable description, used in logs
+    pub fn describe(&self) -> &'static str {
+        match self {
+            ChannelClosureAction::CloseIncoming => "close incoming channels",
+            ChannelClosureAction::InitiateOutgoingClosure => "initiate closure of outgoing channels",
+            ChannelClosureAction::FinalizeOutgoingClosure => "finalize closure of outgoing channels",
+        }
+    }
 }
 
 /// Create a Blokli client from its base URL, e.g. `https://blokli.jura.hoprnet.link`
@@ -208,6 +307,63 @@ mod tests {
             state.channels.insert(c.concrete_channel_id.clone(), c);
         }
         BlokliTestClient::new(state, NopStateMutator)
+    }
+
+    #[test]
+    fn test_closure_action_encoding_uses_safe_functions() {
+        let close = ChannelClosureAction::CloseIncoming.encode(NODE, PEER_A);
+        let decoded = closeIncomingChannelSafeCall::abi_decode(&close).unwrap();
+        assert_eq!(decoded.selfAddress, NODE);
+        assert_eq!(decoded.source, PEER_A);
+
+        let initiate = ChannelClosureAction::InitiateOutgoingClosure.encode(NODE, PEER_B);
+        let decoded = initiateOutgoingChannelClosureSafeCall::abi_decode(&initiate).unwrap();
+        assert_eq!(decoded.selfAddress, NODE);
+        assert_eq!(decoded.destination, PEER_B);
+
+        let finalize = ChannelClosureAction::FinalizeOutgoingClosure.encode(NODE, PEER_C);
+        let decoded = finalizeOutgoingChannelClosureSafeCall::abi_decode(&finalize).unwrap();
+        assert_eq!(decoded.selfAddress, NODE);
+        assert_eq!(decoded.destination, PEER_C);
+    }
+
+    #[test]
+    fn test_channel_endpoints_and_accepted_status() {
+        assert_eq!(
+            ChannelClosureAction::CloseIncoming.channel_endpoints(NODE, PEER_A),
+            (PEER_A, NODE)
+        );
+        assert_eq!(
+            ChannelClosureAction::InitiateOutgoingClosure.channel_endpoints(NODE, PEER_A),
+            (NODE, PEER_A)
+        );
+        assert_eq!(
+            ChannelClosureAction::FinalizeOutgoingClosure.channel_endpoints(NODE, PEER_A),
+            (NODE, PEER_A)
+        );
+
+        let close = ChannelClosureAction::CloseIncoming;
+        assert!(!close.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_CLOSED));
+        assert!(close.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_OPEN));
+        assert!(close.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE));
+
+        let initiate = ChannelClosureAction::InitiateOutgoingClosure;
+        assert!(!initiate.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_CLOSED));
+        assert!(initiate.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_OPEN));
+        assert!(!initiate.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE));
+
+        let finalize = ChannelClosureAction::FinalizeOutgoingClosure;
+        assert!(!finalize.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_CLOSED));
+        assert!(!finalize.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_OPEN));
+        assert!(finalize.accepts_onchain_status(ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE));
+    }
+
+    #[test]
+    fn test_channel_id_matches_hopr_types() {
+        let expected =
+            hopr_types::internal::channels::generate_channel_id(&crate::utils::h2a(NODE), &crate::utils::h2a(PEER_A));
+        assert_eq!(get_channel_id(NODE, PEER_A).as_slice(), expected.as_ref());
+        assert_ne!(get_channel_id(NODE, PEER_A), get_channel_id(PEER_A, NODE));
     }
 
     #[test]
