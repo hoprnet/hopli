@@ -235,6 +235,26 @@ hopli safe-module move \
   --private-key <PRIVATE_KEY>
 ```
 
+Decommission nodes by closing all their channels, on behalf of the Safe each node is registered with
+(the signer must be an owner of a Safe with threshold 1):
+
+```bash
+hopli safe-module decommission-nodes \
+  --network jura \
+  --provider-url https://gnosis-rpc.example/ \
+  --blokli-url https://blokli.jura.hoprnet.link \
+  --node-address 0xNode1...,0xNode2... \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+Instead of `--node-address`, node addresses can be derived from identity files
+(`--identity-directory` or `--identity-from-path` together with the identity password).
+Channel states are read from Blokli (`--blokli-url` or `HOPLI_BLOKLI_URL`). The command closes the
+incoming channels, initiates the closure of the open outgoing channels, and finalizes the closure
+of each outgoing channel once its own notice period is due (`NOTICE_PERIOD_CHANNEL_CLOSURE` after
+its closure was initiated on-chain). Channel operations are bundled into Safe transactions of at
+most `--batch-size` channels (default 30).
+
 ### 4. Winning probability
 
 Set:
