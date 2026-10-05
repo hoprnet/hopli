@@ -156,7 +156,7 @@
 //!   whose identity files are provided to their Safe
 //! ```text
 //! hopli safe-module decommission-nodes \
-//!     --network jura \
+//!     --network jura-prod \
 //!     --identity-directory "./test" \
 //!     --password-path "./test/pwd" \
 //!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \

@@ -263,7 +263,7 @@ their Safe:
 
 ```bash
 hopli safe-module decommission-nodes \
-  --network jura \
+  --network jura-prod \
   --provider-url https://gnosis-rpc.example/ \
   --blokli-url https://blokli.jura.hoprnet.link \
   --identity-directory ./identities \
