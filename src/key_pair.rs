@@ -206,18 +206,59 @@ impl ArgEnvReader<ChainKeypair, String> for PrivateKeyArgs {
             return Err(HelperErrors::UnableToReadPrivateKey(default_env_name.into()));
         };
 
-        // trim the 0x prefix if needed
-        let priv_key_without_prefix = pri_key.strip_prefix("0x").unwrap_or(&pri_key).to_string();
-
-        let decoded_key = hex::decode(priv_key_without_prefix)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to decode private key: {e:?}")))?;
-        ChainKeypair::from_secret(&decoded_key)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to create keypair: {e:?}")))
+        chain_key_from_hex(&pri_key)
     }
 
     /// Read the default private key and return an address string
     fn read_default(&self) -> Result<ChainKeypair, HelperErrors> {
         self.read("PRIVATE_KEY")
+    }
+}
+
+/// Decode a hex-encoded private key, with or without the `0x` prefix, into a chain key
+fn chain_key_from_hex(private_key: &str) -> Result<ChainKeypair, HelperErrors> {
+    // trim the 0x prefix if needed
+    let priv_key_without_prefix = private_key.strip_prefix("0x").unwrap_or(private_key).to_string();
+
+    let decoded_key = hex::decode(priv_key_without_prefix)
+        .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to decode private key: {e:?}")))?;
+    ChainKeypair::from_secret(&decoded_key)
+        .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to create keypair: {e:?}")))
+}
+
+/// Arguments for the private key of an owner of the old Safe, when it differs from `--private-key`.
+#[derive(Debug, Clone, Parser, Default)]
+pub struct OldSafeOwnerPrivateKeyArgs {
+    /// Either provide a private key as argument or as the `OLD_SAFE_OWNER_PRIVATE_KEY` environment variable.
+    #[clap(
+        long,
+        help = "Private key of an owner of the old Safe(s). If not specified, use the OLD_SAFE_OWNER_PRIVATE_KEY \
+                environment variable, or else the key of --private-key",
+        name = "old_safe_owner_private_key",
+        value_name = "OLD_SAFE_OWNER_PRIVATE_KEY"
+    )]
+    pub old_safe_owner_private_key: Option<String>,
+}
+
+impl OldSafeOwnerPrivateKeyArgs {
+    /// Name of the environment variable holding the private key
+    pub const ENV_NAME: &'static str = "OLD_SAFE_OWNER_PRIVATE_KEY";
+
+    /// Read the private key from the cli arg, or else from the environment variable, or else return `fallback`
+    pub fn read_or(&self, fallback: &ChainKeypair) -> Result<ChainKeypair, HelperErrors> {
+        if let Some(private_key) = self.old_safe_owner_private_key.as_deref() {
+            info!("Reading private key of the old safe owner from CLI");
+            chain_key_from_hex(private_key)
+        } else if let Ok(private_key) = env::var(Self::ENV_NAME) {
+            info!(
+                "Reading private key of the old safe owner from environment variable {:?}",
+                Self::ENV_NAME
+            );
+            chain_key_from_hex(&private_key)
+        } else {
+            info!("The owner of the old safe is the signer of --private-key");
+            Ok(fallback.clone())
+        }
     }
 }
 
@@ -512,6 +553,33 @@ mod tests {
             read_id.1.chain_key.public().to_address(),
             created_id.chain_key.public().to_address()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn read_old_safe_owner_private_key_or_fallback() -> anyhow::Result<()> {
+        let fallback = ChainKeypair::from_secret(&hex::decode(DUMMY_PRIVATE_KEY)?)?;
+
+        let with_arg = OldSafeOwnerPrivateKeyArgs {
+            old_safe_owner_private_key: Some(format!("0x{SPECIAL_ENV_KEY}")),
+        };
+        assert_eq!(
+            with_arg.read_or(&fallback)?.secret().as_ref(),
+            hex::decode(SPECIAL_ENV_KEY)?.as_slice()
+        );
+
+        // the environment variable is not set in tests
+        assert!(env::var(OldSafeOwnerPrivateKeyArgs::ENV_NAME).is_err());
+        let without_arg = OldSafeOwnerPrivateKeyArgs::default();
+        assert_eq!(
+            without_arg.read_or(&fallback)?.public().to_address(),
+            fallback.public().to_address()
+        );
+
+        let invalid = OldSafeOwnerPrivateKeyArgs {
+            old_safe_owner_private_key: Some("not-a-key".into()),
+        };
+        assert!(invalid.read_or(&fallback).is_err());
         Ok(())
     }
 
