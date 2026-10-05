@@ -523,6 +523,67 @@ pub async fn transfer_native_tokens<P: Provider + WalletProvider>(
     Ok(tx.value.unwrap_or_default())
 }
 
+/// Transfer all the native tokens of the caller (the default signer of the provider) to `recipient`,
+/// keeping only the amount needed to pay for this transfer.
+///
+/// The gas limit of the transfer is estimated (a Safe proxy consumes more than 21000 gas when receiving
+/// native tokens) and the transaction uses a fixed (legacy) gas price, so that its fee is known in advance and
+/// can be deducted from the transferred amount. Returns the amount transferred, which is zero when the balance
+/// cannot cover the fee.
+pub async fn transfer_all_native_tokens<P: Provider + WalletProvider>(
+    provider: Arc<P>,
+    recipient: Address,
+) -> Result<U256, HelperErrors> {
+    let sender = provider.default_signer_address();
+    let balance = provider.get_balance(sender).await?;
+    if balance.is_zero() {
+        info!("{:?} has no native tokens, skip the transfer", sender);
+        return Ok(U256::ZERO);
+    }
+
+    // the amount does not change the gas used by a plain transfer; zero avoids balance checks of the estimation
+    let gas_limit = provider
+        .estimate_gas(
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(recipient)
+                .with_value(U256::ZERO),
+        )
+        .await?;
+    let gas_price = provider.get_gas_price().await?;
+    let fee = U256::from(gas_limit) * U256::from(gas_price);
+
+    if balance <= fee {
+        info!(
+            "{:?} has {} native tokens, not enough to pay the transfer fee of {}, skip the transfer",
+            sender, balance, fee
+        );
+        return Ok(U256::ZERO);
+    }
+
+    let amount = balance - fee;
+    let tx = TransactionRequest::default()
+        .with_from(sender)
+        .with_to(recipient)
+        .with_value(amount)
+        .with_gas_limit(gas_limit)
+        .with_gas_price(gas_price);
+    let receipt = provider.send_transaction(tx).await?.get_receipt().await?;
+    if !receipt.status() {
+        return Err(HelperErrors::MiddlewareError(format!(
+            "transfer of native tokens from {sender:?} to {recipient:?} failed in tx {:?}",
+            receipt.transaction_hash
+        )));
+    }
+    info!(
+        "{:?} transferred {} native tokens to {:?}",
+        sender,
+        format_units(amount, "ether").unwrap_or_else(|_| amount.to_string()),
+        recipient
+    );
+    Ok(amount)
+}
+
 /// Helper function to predict module address. Note that here the caller is the contract deployer
 /// FIXME: The result mismatch from predicted module address from smart contract
 pub fn predict_module_address(
@@ -2076,6 +2137,70 @@ mod tests {
             U256::from(10),
             "amount transferred does not equal to the desired amount"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_transfer_all_native_tokens_to_safe_in_anvil() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch local anvil instance
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // a safe owned by the deployer
+        let (safe, _) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            vec![],
+            vec![a2h(contract_deployer.public().to_address())],
+            U256::from(1),
+        )
+        .await?;
+
+        // a node with some native tokens
+        let node_key = ChainKeypair::random();
+        let node_address = a2h(node_key.public().to_address());
+        let node_funds = U256::from(1_000_000_000_000_000_000_u128);
+        transfer_native_tokens(client.clone(), vec![node_address], vec![node_funds]).await?;
+
+        let safe_balance_before = client.get_balance(*safe.address()).await?;
+        let node_client = create_rpc_client_to_anvil(&anvil, &node_key);
+        let transferred = transfer_all_native_tokens(node_client.clone(), *safe.address()).await?;
+
+        let safe_balance_after = client.get_balance(*safe.address()).await?;
+        let node_balance_after = client.get_balance(node_address).await?;
+        assert!(transferred > U256::ZERO, "some native tokens must be transferred");
+        assert!(transferred < node_funds, "the transfer fee must be deducted");
+        assert_eq!(safe_balance_after - safe_balance_before, transferred);
+        assert_eq!(node_balance_after, U256::ZERO, "the node must be drained");
+
+        // nothing left to transfer
+        assert_eq!(
+            transfer_all_native_tokens(node_client, *safe.address()).await?,
+            U256::ZERO
+        );
+
+        // a balance that cannot cover the transfer fee is left untouched
+        let dust_node_key = ChainKeypair::random();
+        let dust_node_address = a2h(dust_node_key.public().to_address());
+        transfer_native_tokens(client.clone(), vec![dust_node_address], vec![U256::from(1_000)]).await?;
+        let dust_node_client = create_rpc_client_to_anvil(&anvil, &dust_node_key);
+        assert_eq!(
+            transfer_all_native_tokens(dust_node_client, *safe.address()).await?,
+            U256::ZERO
+        );
+        assert_eq!(client.get_balance(dust_node_address).await?, U256::from(1_000));
         Ok(())
     }
 
