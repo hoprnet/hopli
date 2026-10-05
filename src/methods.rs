@@ -17,19 +17,34 @@ use hopr_bindings::{
         DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
         ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
         SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
-    }, exports::alloy::{
-        network::{EthereumWallet, TransactionBuilder}, primitives::{Address, B256, Bytes, U256, keccak256, utils::{format_units, parse_units}}, providers::{
+    },
+    exports::alloy::{
+        network::{EthereumWallet, TransactionBuilder},
+        primitives::{
+            Address, B256, Bytes, U256, keccak256,
+            utils::{format_units, parse_units},
+        },
+        providers::{
             CallInfoTrait, CallItem, Identity, MULTICALL3_ADDRESS, MulticallBuilder, MulticallError, Provider,
             RootProvider, WalletProvider,
             bindings::IMulticall3::{Call3, aggregate3Call},
             fillers::*,
-        }, rpc::types::TransactionRequest, signers::{Signer, local::PrivateKeySigner}, sol, sol_types::{SolCall, SolValue},
-    }, hopr_node_management_module::HoprNodeManagementModule::{
+        },
+        rpc::types::TransactionRequest,
+        signers::{Signer, local::PrivateKeySigner},
+        sol,
+        sol_types::{SolCall, SolValue},
+    },
+    hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
         removeNodeCall, scopeTargetServiceRegistryCall, scopeTargetTokenCall,
-    }, hopr_node_safe_migration::HoprNodeSafeMigration::{
+    },
+    hopr_node_safe_migration::HoprNodeSafeMigration::{
         deployNewV4ModuleCall, migrateSafeV141ToL2AndMigrateToUpgradeableModuleCall,
-    }, hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall}, hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall}, hopr_token::HoprToken::{HoprTokenInstance, approveCall},
+    },
+    hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
+    hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
+    hopr_token::HoprToken::{HoprTokenInstance, approveCall},
 };
 use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};

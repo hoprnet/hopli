@@ -26,8 +26,8 @@
 //!     - if node is included in the module
 //!     - Get all the targets of the safe (then check if channel and announcement are there)
 //!     - Get the owner of the module
-//! - [SafeModuleSubcommands::Replace] only available for v4 and v5 networks (jura-* and piz-palu-*) and later.
-//!   It replaces an old module with a new module and include nodes in the new one.
+//! - [SafeModuleSubcommands::Replace] only available for v4 and v5 networks (jura-* and piz-palu-*) and later. It
+//!   replaces an old module with a new module and include nodes in the new one.
 //! - [SafeModuleSubcommands::NewModule] creates a new module (v4, v5 compatible) and adds nodes to the new module.
 //! - [SafeModuleSubcommands::AddTarget] adds a new contract target to the module.
 //! - [SafeModuleSubcommands::AddNode] adds an existing node identity to an already-deployed safe and module pair,
@@ -37,8 +37,8 @@
 //!   and which known HOPR network configuration matches the on-chain state.
 //!
 //! Some sample commands
-//! - Create a Safe and module with a 10.5 HOPR channels allowance, fund the Safe with 10 HOPR,
-//!   and send 0.1 native tokens to each node:
+//! - Create a Safe and module with a 10.5 HOPR channels allowance, fund the Safe with 10 HOPR, and send 0.1 native
+//!   tokens to each node:
 //! ```text
 //! hopli safe-module create \
 //!     --network anvil-localhost \
@@ -1789,7 +1789,7 @@ mod tests {
             vec![deployer_addr],
             vec![deployer_addr],
             U256::from(1),
-            None
+            None,
         )
         .await?;
 
@@ -1835,7 +1835,7 @@ mod tests {
             vec![deployer_addr],
             vec![deployer_addr],
             U256::from(1),
-            None
+            None,
         )
         .await?;
 
