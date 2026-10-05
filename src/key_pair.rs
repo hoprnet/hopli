@@ -426,23 +426,32 @@ impl IdentityFileArgs {
         Ok(files)
     }
 
-    /// read identity files and return their Ethereum addresses
-    pub fn to_addresses(&self) -> Result<Vec<Address>, HelperErrors> {
+    /// read identity files and return their chain keys, which can sign transactions on behalf of the nodes
+    pub fn to_chain_keys(&self) -> Result<Vec<ChainKeypair>, HelperErrors> {
         let files = self.clone().get_files()?;
 
-        // get Ethereum addresses from identity files
+        // get chain keys from identity files
         if !files.is_empty() {
             // check if password is provided
             let pwd = self.password.read_default()?;
 
             // read all the identities from the directory
             Ok(read_identities(files, &pwd)?
-                .values()
-                .map(|ni| ni.chain_key.public().to_address())
+                .into_values()
+                .map(|ni| ni.chain_key)
                 .collect())
         } else {
-            Ok(Vec::<Address>::new())
+            Ok(Vec::<ChainKeypair>::new())
         }
+    }
+
+    /// read identity files and return their Ethereum addresses
+    pub fn to_addresses(&self) -> Result<Vec<Address>, HelperErrors> {
+        Ok(self
+            .to_chain_keys()?
+            .iter()
+            .map(|chain_key| chain_key.public().to_address())
+            .collect())
     }
 }
 
@@ -503,6 +512,40 @@ mod tests {
             read_id.1.chain_key.public().to_address(),
             created_id.chain_key.public().to_address()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn read_chain_keys_and_addresses_from_identity_args() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let tmp = tempdir()?;
+
+        let path = tmp.path().to_str().context("should produce a valid tmp path string")?;
+        let pwd = "password";
+        let (_, created_id) = create_identity(path, pwd, &None)?;
+        let pwd_path = tmp.path().join("pwd");
+        fs::write(&pwd_path, pwd)?;
+
+        let files = get_files(path, &None);
+        assert_eq!(files.len(), 1, "must have one identity file");
+        let identity_args = IdentityFileArgs {
+            identity_from_directory: None,
+            identity_from_path: Some(files[0].clone()),
+            password: PasswordArgs {
+                password_path: Some(pwd_path),
+            },
+        };
+
+        let chain_keys = identity_args.to_chain_keys()?;
+        assert_eq!(chain_keys.len(), 1, "must read one chain key");
+        assert_eq!(chain_keys[0].secret().as_ref(), created_id.chain_key.secret().as_ref());
+        assert_eq!(
+            identity_args.to_addresses()?,
+            vec![created_id.chain_key.public().to_address()]
+        );
+
+        // no identity file provided, no key
+        assert!(IdentityFileArgs::default().to_chain_keys()?.is_empty());
         Ok(())
     }
 
