@@ -1,10 +1,10 @@
-//! This module contains arguments and functions to manage safe and module.
-//! [SafeModuleSubcommands] defines three subcommands: create, move, and migrate.
-//! - [SafeModuleSubcommands::Create] creates staking wallets (safe and node management module) and execute necessary
-//!   on-chain transactions to setup a HOPR node. Detailed breakdown of the steps:
-//!     - create a Safe proxy instance and HOPR node management module proxy instance
-//!     - include nodes configure default permissions on the created module proxy
-//!     - fund the node and Safe with some native tokens and HOPR tokens respectively
+//! CLI arguments and operations for managing Safes and HOPR node management modules.
+//! [SafeModuleSubcommands] provides the following operations:
+//! - [SafeModuleSubcommands::Create] deploys a Safe and node management module:
+//!     - configure default module permissions and include supplied nodes
+//!     - optionally override the channels contract's allowance to spend the Safe's HOPR tokens
+//!     - set the Safe's owners and signature threshold
+//!     - optionally fund the Safe with HOPR tokens and each node with native tokens in subsequent transactions
 //! - [SafeModuleSubcommands::Move] moves a node from to an existing Safe. Note that the Safe should has a node
 //!   management module attached and configured. Note that the admin key of the old and new safes are the same. This
 //!   command does not support moving nodes to safes controled by a different admin key. Note that all the safes
@@ -37,7 +37,8 @@
 //!   and which known HOPR network configuration matches the on-chain state.
 //!
 //! Some sample commands
-//! - Express creation of a safe and a module
+//! - Create a Safe and module with a 10.5 HOPR channels allowance, fund the Safe with 10 HOPR,
+//!   and send 0.1 native tokens to each node:
 //! ```text
 //! hopli safe-module create \
 //!     --network anvil-localhost \
@@ -48,7 +49,6 @@
 //!     --allowance 10.5 \
 //!     --hopr-amount 10 \
 //!     --native-amount 0.1 \
-//!     --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
@@ -182,7 +182,7 @@ use crate::{
 /// CLI arguments for `hopli safe-module`
 #[derive(Clone, Debug, Parser)]
 pub enum SafeModuleSubcommands {
-    /// Create a safe and a module proxy for the HOPR node network
+    /// Deploy a Safe and HOPR node management module, with optional funding
     #[command(visible_alias = "cr")]
     Create {
         /// Network name, contracts config file root, and customized provider, if available
@@ -193,7 +193,7 @@ pub enum SafeModuleSubcommands {
         #[command(flatten)]
         local_identity: IdentityFileArgs,
 
-        /// node addresses
+        /// Node addresses to include alongside any addresses read from identity files
         #[clap(
             help = "Comma separated node Ethereum addresses",
             long,
@@ -202,18 +202,18 @@ pub enum SafeModuleSubcommands {
         )]
         node_address: Option<String>,
 
-        /// admin addresses
+        /// Safe owners; defaults to the transaction signer when omitted
         #[clap(
-            help = "Comma separated node Ethereum addresses",
+            help = "Comma-separated Safe owner addresses; defaults to the transaction signer",
             long,
             short = 'a',
             default_value = None
         )]
         admin_address: Option<String>,
 
-        /// Threshold for the generated safe
+        /// Required owner signatures, from 1 through the number of Safe owners
         #[clap(
-            help = "Threshold for the generated safe, e.g. 1",
+            help = "Required Safe owner signatures, from 1 through the number of owners",
             long,
             short,
             value_parser = RangedU64ValueParser::<u32>::new().range(1..),
@@ -221,27 +221,27 @@ pub enum SafeModuleSubcommands {
         )]
         threshold: u32,
 
-        /// Allowance of the channel contract to manage HOPR tokens on behalf of deployed safe
+        /// Channels contract allowance to spend the new Safe's HOPR tokens
         #[clap(
-            help = "Provide the allowance of the channel contract to manage HOPR tokens on behalf of deployed safe. Value in ether, e.g. 10",
+            help = "Channels spending allowance in HOPR tokens (e.g. 10.5); 0 clears it, omission keeps the factory default",
             long,
             short = 'l',
             value_parser = clap::value_parser!(f64),
         )]
         allowance: Option<f64>,
 
-        /// The amount of HOPR tokens (in floating number) to be funded to the new safe
+        /// Optional HOPR funding for the new Safe, independent of its spending allowance
         #[clap(
-            help = "Hopr amount in ether, e.g. 10",
+            help = "HOPR tokens to send to the new Safe, e.g. 10.5",
             long,
             short = 'm',
             value_parser = clap::value_parser!(f64),
         )]
         hopr_amount: Option<f64>,
 
-        /// The amount of native tokens (in floating number) to be funded per node
+        /// Optional native-token funding per node
         #[clap(
-            help = "Native token amount in ether, e.g. 1",
+            help = "Native tokens to send to each node, e.g. 0.1",
             long,
             short = 'g',
             value_parser = clap::value_parser!(f64),
@@ -553,15 +553,16 @@ pub enum SafeModuleSubcommands {
 }
 
 impl SafeModuleSubcommands {
-    /// Execute the command, which quickly create necessary staking wallets
-    /// and execute necessary on-chain transactions to setup a HOPR node.
+    /// Create a Safe and node management module, then optionally fund the Safe and nodes.
     ///
-    /// 1. Create a safe instance and a node management module instance:
-    /// 2. Set default permissions for the module
-    /// 3. Include node as a member with default permission on sending assets
-    /// 4. transfer some HOPR token to the new safe (directly)
-    /// 5. transfer some native tokens to nodes
-    /// 6. approve allowance for the safe on the 
+    /// Deployment configures default module permissions, includes supplied nodes, and sets the Safe's admins
+    /// and threshold. If `allowance` is provided, it sets the channels contract's spending allowance on the
+    /// HOPR token contract in whole-token units (18 decimals). `Some(0.0)` clears the allowance; `None` keeps
+    /// the factory default. `hopr_amount` and `native_amount` independently fund the Safe and nodes.
+    ///
+    /// Node addresses combine explicit input and local identity files. Omitted admins default to the signer.
+    /// Deployment and Safe setup complete in one multicall; optional funding runs in later transactions.
+    /// The deployed addresses are printed before funding, so a funding error leaves the deployment in place.
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_safe_module_creation(
         network_provider: NetworkProviderArgs,
@@ -574,7 +575,7 @@ impl SafeModuleSubcommands {
         native_amount: Option<f64>,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        // read all the node addresses
+        // Combine explicit node addresses with addresses loaded from local identities.
         let mut node_eth_addresses: Vec<Address> = Vec::new();
         if let Some(addresses) = node_address {
             node_eth_addresses.extend(
@@ -602,7 +603,7 @@ impl SafeModuleSubcommands {
         let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
-        // read all the admin addresses
+        // Use the requested Safe owners, or let the transaction signer own the Safe by default.
         let admin_eth_addresses: Vec<Address> = match admin_address {
             Some(admin_address_str) => admin_address_str
                 .split(',')
@@ -611,13 +612,8 @@ impl SafeModuleSubcommands {
             None => vec![a2h(signer_private_key.clone().public().to_address())],
         };
 
-        // within one multicall, as an owner of the safe
-        // deploy a safe proxy instance and a module proxy instance with multicall as an owner
-        // add announcement as a permitted target in the deployed module proxy
-        // approve token transfer to be done for the safe by channel contracts
-        // if node addresses are known, include nodes to the module by safe
-        // transfer safe ownership to actual admins
-        // set desired threshold
+        // Deploy and configure the Safe and module in one transaction. The helper applies any
+        // allowance override before removing Multicall3 as a temporary Safe owner.
         let hopr_stake_factory =
             HoprNodeStakeFactory::new(contract_addresses.addresses.node_stake_factory, rpc_provider.clone());
 
@@ -635,7 +631,7 @@ impl SafeModuleSubcommands {
         println!("safe {:?}", safe.address());
         println!("node_module {:?}", node_module.address());
 
-        // direct transfer of some HOPR tokens to the safe
+        // Fund the deployed Safe in a separate transaction, minting first if needed and permitted.
         if let Some(hopr_amount_for_safe) = hopr_amount {
             let hopr_token = HoprToken::new(contract_addresses.addresses.token, rpc_provider.clone());
             let hopr_to_be_transferred: U256 = parse_units(&hopr_amount_for_safe.to_string(), "ether")
@@ -650,7 +646,7 @@ impl SafeModuleSubcommands {
             );
         }
 
-        // distribute some native tokens to the nodes
+        // Send the requested native-token amount to each node, independently of Safe funding.
         if let Some(native_amount_for_node) = native_amount {
             let native_to_be_transferred: U256 = parse_units(&native_amount_for_node.to_string(), "ether")
                 .map_err(|_| HelperErrors::ParseError("Failed to parse HOPR amount units".into()))?

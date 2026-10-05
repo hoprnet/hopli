@@ -687,15 +687,24 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
     Ok((deployed_safe, deployed_module))
 }
 
-/// Deploy a safe and a module proxies via v4 HoprStakeFactory contract with default permissions and announcement
-/// targets With the multicall contract, it deploys a safe proxy instance and a module proxy instance with multicall as
-/// an owner, and completes necessary setup.
-/// Then the multicall includes some additional steps:
-/// 1. if node addresses are known, include nodes to the module by safe
-/// 2. transfer safe ownership to actual admins
-/// 3. set desired threshold
+/// Deploy Safe and node management module proxies through the stake factory in one multicall.
 ///
-/// Returns safe proxy address and module proxy address
+/// The factory configures the module's default targets and permissions. Multicall temporarily owns the Safe to:
+///
+/// 1. Include any supplied node addresses in the module.
+/// 2. Set the channels contract's token allowance when `allowance` is provided.
+/// 3. Remove itself as an owner, leaving `admins` with the requested `threshold`.
+///
+/// `allowance` is expressed in whole HOPR tokens and converted to 18-decimal base units. For example,
+/// `Some(10.5)` sets `HoprToken.allowance(safe, hopr_channels_address)` to `10_500_000_000_000_000_000`.
+/// A provided value replaces the factory allowance; `Some(0.0)` clears it and `None` preserves it.
+/// This grants spending permission to the channels contract; it does not fund the Safe.
+///
+/// Returns contract instances for the deployed Safe and module proxies.
+///
+/// # Panics
+///
+/// Panics if `admins` is empty, contains Multicall3, or `threshold` is outside `1..=admins.len()`.
 #[allow(clippy::too_many_arguments)]
 pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provider>(
     hopr_node_stake_factory: HoprNodeStakeFactoryInstance<Arc<P>>,
@@ -720,7 +729,7 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         "multicall contract cannot be an admin"
     );
 
-    // build a new temporary admin
+    // Multicall3 needs temporary ownership to execute the Safe's setup calls in this transaction.
     let mut temporary_admins: Vec<Address> = admins.clone();
     temporary_admins.insert(0, MULTICALL3_ADDRESS);
     info!(
@@ -732,7 +741,7 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     // build the default permissions of capabilities
     let default_target = build_default_target(hopr_channels_address)?;
 
-    // salt nonce
+    // Derive a deployment salt from the signer's address and pending transaction nonce.
     let curr_nonce = provider
         .get_transaction_count(caller)
         .pending()
@@ -803,7 +812,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
     }
 
-    // Approve the channels contract to transfer tokens on behalf of the Safe if provided.
+    // Execute approve through the Safe so the token contract records the Safe as the token owner
+    // and the channels contract as spender. None preserves the factory allowance; Some(0.0) clears it.
     if let Some(allowance_amount) = allowance {
         let allowance_to_be_approved: U256 = parse_units(&allowance_amount.to_string(), "ether")
             .map_err(|_| HelperErrors::ParseError("Failed to parse allowance amount units".into()))?
@@ -826,7 +836,8 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         info!("Allowance approval multicall payload is created");
     }
 
-    // renounce ownership granted to multicall so that only actual admins are included. Set the threshold.
+    // Keep this last: earlier setup calls need Multicall3's ownership and the initial threshold.
+    // Remove the temporary owner and activate the requested signature threshold together.
     let remove_owner_tx_payload = removeOwnerCall {
         prevOwner: Address::from_str(SENTINEL_OWNERS)
             .map_err(|e| HelperErrors::ParseError(format!("Invalid SENTINEL_OWNERS address: {e}")))?,
