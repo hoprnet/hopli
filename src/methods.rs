@@ -2162,9 +2162,11 @@ mod tests {
         let (safe, _) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             vec![a2h(contract_deployer.public().to_address())],
             U256::from(1),
+            None,
         )
         .await?;
 

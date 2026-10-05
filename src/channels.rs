@@ -790,9 +790,11 @@ mod tests {
         let (safe, _) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *channels.address(),
+            *instances.token.address(),
             vec![node],
             vec![deployer_address],
             U256::ONE,
+            None,
         )
         .await?;
         transfer_native_tokens(client.clone(), vec![node, peer_a], vec![one_ether, one_ether]).await?;
