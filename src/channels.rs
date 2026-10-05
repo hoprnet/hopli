@@ -485,9 +485,25 @@ mod tests {
         BlokliTestClient, BlokliTestState, NopStateMutator,
         types::{Account, Channel, DateTime, TokenValueString, Uint64},
     };
-    use hopr_bindings::exports::alloy::primitives::address;
+    use hopr_bindings::{
+        config::ContractInstances,
+        constants::SAFE_MULTISEND_ADDRESS,
+        exports::alloy::primitives::{U256, address, aliases::U96},
+        hopr_channels::HoprChannels::{self, fundChannelSafeCall},
+        hopr_node_safe_registry::HoprNodeSafeRegistry,
+        hopr_token::HoprToken,
+    };
+    use hopr_types::crypto::keypairs::Keypair;
 
     use super::*;
+    use crate::{
+        methods::{
+            MultisendTransaction, SafeTxOperation, create_rpc_client_to_anvil,
+            deploy_safe_module_with_targets_and_nodes, get_chain_id_and_safe_nonce, get_notice_period_channel_closure,
+            send_multisend_safe_transaction_with_threshold_one, transfer_native_tokens, transfer_or_mint_tokens,
+        },
+        utils::{a2h, create_anvil},
+    };
 
     const NODE: Address = address!("1111111111111111111111111111111111111111");
     const PEER_A: Address = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -517,28 +533,41 @@ mod tests {
         }
     }
 
-    /// NODE (1) <-> PEER_A (2), PEER_B (3), PEER_C (4)
-    fn test_client() -> BlokliTestClient<NopStateMutator> {
+    /// Blokli test client knowing the given accounts (key id 1, 2, ... in order) and channels
+    /// (`(source key id, destination key id, status)`)
+    fn blokli_client_with(
+        accounts: &[Address],
+        channels: &[(i32, i32, ChannelStatus)],
+    ) -> BlokliTestClient<NopStateMutator> {
         let mut state = BlokliTestState::default();
         state.accounts.clear();
         state.channels.clear();
-        for (key_id, address) in [(1, NODE), (2, PEER_A), (3, PEER_B), (4, PEER_C)] {
-            state.accounts.insert(key_id, account(key_id, address));
+        for (index, address) in accounts.iter().enumerate() {
+            let key_id = u32::try_from(index + 1).unwrap();
+            state.accounts.insert(key_id, account(key_id, *address));
         }
-        let channels = [
-            // incoming
-            channel(2, 1, ChannelStatus::Open),
-            channel(3, 1, ChannelStatus::PendingToClose),
-            channel(4, 1, ChannelStatus::Closed),
-            // outgoing
-            channel(1, 2, ChannelStatus::Open),
-            channel(1, 3, ChannelStatus::Open),
-            channel(1, 4, ChannelStatus::PendingToClose),
-        ];
-        for c in channels {
+        for (source, destination, status) in channels {
+            let c = channel(*source, *destination, *status);
             state.channels.insert(c.concrete_channel_id.clone(), c);
         }
         BlokliTestClient::new(state, NopStateMutator)
+    }
+
+    /// NODE (1) <-> PEER_A (2), PEER_B (3), PEER_C (4)
+    fn test_client() -> BlokliTestClient<NopStateMutator> {
+        blokli_client_with(
+            &[NODE, PEER_A, PEER_B, PEER_C],
+            &[
+                // incoming
+                (2, 1, ChannelStatus::Open),
+                (3, 1, ChannelStatus::PendingToClose),
+                (4, 1, ChannelStatus::Closed),
+                // outgoing
+                (1, 2, ChannelStatus::Open),
+                (1, 3, ChannelStatus::Open),
+                (1, 4, ChannelStatus::PendingToClose),
+            ],
+        )
     }
 
     #[test]
@@ -714,6 +743,215 @@ mod tests {
 
         let none = get_channel_counterparties(&client, 1, ChannelDirection::Outgoing, &[], &mut cache).await?;
         assert!(none.is_empty());
+        Ok(())
+    }
+
+    /// Close all the channels of a node through its Safe, on a HoprChannels contract with a short
+    /// `NOTICE_PERIOD_CHANNEL_CLOSURE`, deployed on Anvil:
+    /// - PEER_A -> node: open, closed as incoming channel
+    /// - node -> PEER_A: open, its closure is initiated then finalized
+    /// - node -> PEER_B: already pending to close, finalized
+    /// - node -> PEER_C: indexed as open by Blokli but does not exist on-chain, skipped
+    #[tokio::test]
+    async fn test_close_all_channels_of_nodes_on_anvil_with_short_notice_period() -> anyhow::Result<()> {
+        const NOTICE_PERIOD: u32 = 5;
+        let channel_balance = U96::from(1_000_000_000_000_000_000_u128);
+        let one_ether = U256::from(1_000_000_000_000_000_000_u128);
+
+        let anvil = create_anvil(None);
+        let deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let deployer_address = a2h(deployer.public().to_address());
+        let client = create_rpc_client_to_anvil(&anvil, &deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), deployer_address, anvil.addresses()[1]).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // HoprChannels contract with a short notice period
+        let channels = HoprChannels::deploy(
+            client.clone(),
+            *instances.token.address(),
+            NOTICE_PERIOD,
+            *instances.safe_registry.address(),
+        )
+        .await?;
+        assert_eq!(
+            get_notice_period_channel_closure(channels.clone()).await?,
+            u64::from(NOTICE_PERIOD)
+        );
+
+        // a node with a Safe owned by the deployer, and peers without Safe
+        let node_key = ChainKeypair::random();
+        let node = a2h(node_key.public().to_address());
+        let peer_a_key = ChainKeypair::random();
+        let peer_a = a2h(peer_a_key.public().to_address());
+        let peer_b = a2h(ChainKeypair::random().public().to_address());
+        let peer_c = a2h(ChainKeypair::random().public().to_address());
+        let (safe, _) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *channels.address(),
+            vec![node],
+            vec![deployer_address],
+            U256::ONE,
+        )
+        .await?;
+        transfer_native_tokens(client.clone(), vec![node, peer_a], vec![one_ether, one_ether]).await?;
+        transfer_or_mint_tokens(
+            instances.token.clone(),
+            vec![*safe.address(), peer_a],
+            vec![U256::from(10) * one_ether, U256::from(10) * one_ether],
+        )
+        .await?;
+        let node_client = create_rpc_client_to_anvil(&anvil, &node_key);
+        HoprNodeSafeRegistry::new(*instances.safe_registry.address(), node_client)
+            .registerSafeByNode(*safe.address())
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        // the Safe opens node -> PEER_A and node -> PEER_B, then initiates the closure of node -> PEER_B
+        let safe_tx = |data: Bytes| MultisendTransaction {
+            encoded_data: data,
+            tx_operation: SafeTxOperation::Call,
+            to: *channels.address(),
+            value: U256::ZERO,
+        };
+        let (chain_id, nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+        send_multisend_safe_transaction_with_threshold_one(
+            safe.clone(),
+            deployer.clone(),
+            SAFE_MULTISEND_ADDRESS,
+            vec![
+                safe_tx(
+                    fundChannelSafeCall {
+                        selfAddress: node,
+                        account: peer_a,
+                        amount: channel_balance,
+                    }
+                    .abi_encode()
+                    .into(),
+                ),
+                safe_tx(
+                    fundChannelSafeCall {
+                        selfAddress: node,
+                        account: peer_b,
+                        amount: channel_balance,
+                    }
+                    .abi_encode()
+                    .into(),
+                ),
+                safe_tx(ChannelClosureAction::InitiateOutgoingClosure.encode(node, peer_b)),
+            ],
+            chain_id,
+            nonce,
+        )
+        .await?;
+
+        // PEER_A opens PEER_A -> node
+        let peer_a_client = create_rpc_client_to_anvil(&anvil, &peer_a_key);
+        HoprToken::new(*instances.token.address(), peer_a_client.clone())
+            .approve(*channels.address(), U256::from(channel_balance))
+            .send()
+            .await?
+            .watch()
+            .await?;
+        HoprChannels::new(*channels.address(), peer_a_client)
+            .fundChannel(node, channel_balance)
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        let status_of = |source: Address, destination: Address| {
+            let channels = channels.clone();
+            async move {
+                anyhow::Ok(
+                    channels
+                        .channels(get_channel_id(source, destination))
+                        .call()
+                        .await?
+                        .status,
+                )
+            }
+        };
+        assert_eq!(status_of(peer_a, node).await?, ONCHAIN_CHANNEL_STATUS_OPEN);
+        assert_eq!(status_of(node, peer_a).await?, ONCHAIN_CHANNEL_STATUS_OPEN);
+        assert_eq!(status_of(node, peer_b).await?, ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE);
+
+        // Blokli: node (1), PEER_A (2), PEER_B (3), PEER_C (4)
+        let blokli = blokli_client_with(
+            &[node, peer_a, peer_b, peer_c],
+            &[
+                (2, 1, ChannelStatus::Open),
+                (1, 2, ChannelStatus::Open),
+                (1, 3, ChannelStatus::PendingToClose),
+                (1, 4, ChannelStatus::Open),
+            ],
+        );
+
+        let safe_tokens_before = instances.token.balanceOf(*safe.address()).call().await?;
+        let peer_a_tokens_before = instances.token.balanceOf(peer_a).call().await?;
+
+        // from now on, Anvil mines a block every second (instead of one block per transaction), so that the chain
+        // time moves on while waiting for the notice period, as on a live chain
+        client
+            .raw_request::<_, serde_json::Value>("evm_setIntervalMining".into(), [1])
+            .await?;
+
+        // batches of one channel, to send several Safe transactions per step
+        let summary = close_all_channels_of_nodes(
+            &blokli,
+            &deployer,
+            channels.clone(),
+            &[NodeWithSafe {
+                node,
+                safe: *safe.address(),
+            }],
+            1,
+            Duration::from_secs(1),
+        )
+        .await?;
+
+        assert_eq!(
+            summary,
+            ChannelClosureSummary {
+                incoming_closed: 1,
+                outgoing_initiated: 1,
+                outgoing_finalized: 2,
+            }
+        );
+        for (source, destination) in [(peer_a, node), (node, peer_a), (node, peer_b)] {
+            assert_eq!(
+                status_of(source, destination).await?,
+                ONCHAIN_CHANNEL_STATUS_CLOSED,
+                "channel {source:?} -> {destination:?} must be closed"
+            );
+        }
+        // balances of outgoing channels return to the Safe, the balance of the incoming one to PEER_A
+        assert_eq!(
+            instances.token.balanceOf(*safe.address()).call().await?,
+            safe_tokens_before + U256::from(2) * U256::from(channel_balance)
+        );
+        assert_eq!(
+            instances.token.balanceOf(peer_a).call().await?,
+            peer_a_tokens_before + U256::from(channel_balance)
+        );
+
+        // nothing left to close
+        let summary = close_all_channels_of_nodes(
+            &blokli,
+            &deployer,
+            channels,
+            &[NodeWithSafe {
+                node,
+                safe: *safe.address(),
+            }],
+            1,
+            Duration::from_secs(1),
+        )
+        .await?;
+        assert_eq!(summary, ChannelClosureSummary::default());
         Ok(())
     }
 }
