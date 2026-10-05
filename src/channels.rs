@@ -14,6 +14,8 @@
 use std::{
     collections::{BTreeSet, HashMap},
     str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 
 use blokli_client::{
@@ -23,15 +25,24 @@ use blokli_client::{
 use hopr_bindings::{
     exports::alloy::{
         primitives::{Address, B256, Bytes, keccak256},
+        providers::{Provider, WalletProvider},
         sol_types::{SolCall, SolValue},
     },
     hopr_channels::HoprChannels::{
-        closeIncomingChannelSafeCall, finalizeOutgoingChannelClosureSafeCall, initiateOutgoingChannelClosureSafeCall,
+        HoprChannelsInstance, closeIncomingChannelSafeCall, finalizeOutgoingChannelClosureSafeCall,
+        initiateOutgoingChannelClosureSafeCall,
     },
 };
-use tracing::debug;
+use hopr_types::crypto::keypairs::ChainKeypair;
+use tracing::{debug, info};
 
-use crate::utils::HelperErrors;
+use crate::{
+    methods::{
+        SafeSingleton, execute_channel_closure_through_safe, get_latest_block_timestamp, get_pending_outgoing_closures,
+        wait_until_block_timestamp_passed,
+    },
+    utils::HelperErrors,
+};
 
 /// Default number of channel operations bundled into a single Safe transaction.
 ///
@@ -294,6 +305,178 @@ pub fn merge_unique_addresses<'a, I: IntoIterator<Item = &'a [Address]>>(lists: 
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+/// A node, and the Safe it is registered with in the Node-Safe registry
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeWithSafe {
+    /// Address of the node
+    pub node: Address,
+    /// Address of the Safe the node is registered with
+    pub safe: Address,
+}
+
+/// Number of channels on which each closure action has been executed by [`close_all_channels_of_nodes`]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelClosureSummary {
+    /// Incoming channels closed
+    pub incoming_closed: usize,
+    /// Outgoing channels whose closure has been initiated
+    pub outgoing_initiated: usize,
+    /// Outgoing channels whose closure has been finalized
+    pub outgoing_finalized: usize,
+}
+
+/// Close all the channels of the given nodes, on behalf of their Safe, which must be executable by the
+/// `safe_owner_key` alone.
+///
+/// 1. Close all the incoming channels (Open or PendingToClose) of every node
+/// 2. Initiate the closure of all the Open outgoing channels of every node
+/// 3. Collect the PendingToClose outgoing channels of every node, i.e. those indexed by Blokli and those initiated in
+///    step 2 (which Blokli may not have indexed yet), and read their closure time on-chain
+/// 4. Finalize the closure of each outgoing channel once its own closure time has passed, i.e. once
+///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
+///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are handled
+///    together, so the notice period is not waited once per node. The chain time is checked at most every
+///    `poll_interval` while waiting.
+///
+/// Channels are read from Blokli; before sending each batch, their on-chain status is checked so that
+/// channels already closed (or not yet indexed by Blokli) do not make the batch revert.
+/// Nodes unknown to Blokli have no channel and are skipped.
+pub async fn close_all_channels_of_nodes<C, P>(
+    blokli: &C,
+    safe_owner_key: &ChainKeypair,
+    channels: HoprChannelsInstance<Arc<P>>,
+    nodes: &[NodeWithSafe],
+    batch_size: usize,
+    poll_interval: Duration,
+) -> Result<ChannelClosureSummary, HelperErrors>
+where
+    C: BlokliQueryClient + Sync,
+    P: Provider + WalletProvider,
+{
+    let provider = channels.provider().clone();
+    let mut summary = ChannelClosureSummary::default();
+
+    // find the Blokli key id of each node
+    let mut known_nodes: Vec<(NodeWithSafe, KeyId)> = Vec::new();
+    for node in nodes {
+        match get_node_key_id(blokli, node.node).await? {
+            Some(key_id) => known_nodes.push((*node, key_id)),
+            None => info!("node {:?} is not known by Blokli, it has no channel", node.node),
+        }
+    }
+    let safes: HashMap<Address, Address> = nodes.iter().map(|n| (n.node, n.safe)).collect();
+
+    // counterparty addresses resolved from Blokli key ids
+    let mut address_cache = HashMap::new();
+
+    // 1. close incoming channels
+    for (node, key_id) in known_nodes.iter() {
+        let sources = get_channel_counterparties(
+            blokli,
+            *key_id,
+            ChannelDirection::Incoming,
+            &[ChannelStatus::Open, ChannelStatus::PendingToClose],
+            &mut address_cache,
+        )
+        .await?;
+        let closed = execute_channel_closure_through_safe(
+            SafeSingleton::new(node.safe, provider.clone()),
+            safe_owner_key.clone(),
+            channels.clone(),
+            ChannelClosureAction::CloseIncoming,
+            node.node,
+            &sources,
+            batch_size,
+        )
+        .await?;
+        info!("node {:?}: {} incoming channels are closed", node.node, closed);
+        summary.incoming_closed += closed;
+    }
+
+    // 2. initiate the closure of open outgoing channels
+    let mut initiated: HashMap<Address, Vec<Address>> = HashMap::new();
+    for (node, key_id) in known_nodes.iter() {
+        let destinations = get_channel_counterparties(
+            blokli,
+            *key_id,
+            ChannelDirection::Outgoing,
+            &[ChannelStatus::Open],
+            &mut address_cache,
+        )
+        .await?;
+        let count = execute_channel_closure_through_safe(
+            SafeSingleton::new(node.safe, provider.clone()),
+            safe_owner_key.clone(),
+            channels.clone(),
+            ChannelClosureAction::InitiateOutgoingClosure,
+            node.node,
+            &destinations,
+            batch_size,
+        )
+        .await?;
+        info!(
+            "node {:?}: closure of {} outgoing channels is initiated",
+            node.node, count
+        );
+        summary.outgoing_initiated += count;
+        initiated.insert(node.node, destinations);
+    }
+
+    // 3. collect the outgoing channels pending to close: those indexed by Blokli, and those initiated in step 2
+    //    (which Blokli may not have indexed yet), without duplicates. Their closure time is read on-chain, as it
+    //    depends on when the closure of each channel was initiated.
+    let mut pending: Vec<PendingOutgoingClosure> = Vec::new();
+    for (node, key_id) in known_nodes.iter() {
+        let indexed = get_channel_counterparties(
+            blokli,
+            *key_id,
+            ChannelDirection::Outgoing,
+            &[ChannelStatus::PendingToClose],
+            &mut address_cache,
+        )
+        .await?;
+        let just_initiated = initiated.get(&node.node).map(Vec::as_slice).unwrap_or_default();
+        let destinations = merge_unique_addresses([indexed.as_slice(), just_initiated]);
+        pending.extend(get_pending_outgoing_closures(&channels, node.node, &destinations).await?);
+    }
+
+    // 4. finalize the closure of each outgoing channel once its own notice period is due,
+    //    waiting for the next due channel in between
+    while !pending.is_empty() {
+        let now = get_latest_block_timestamp(provider.as_ref()).await?;
+        let (due, not_due) = split_due_closures(pending, now);
+        for (node, destinations) in group_destinations_by_node(&due) {
+            let Some(safe) = safes.get(&node) else {
+                continue;
+            };
+            let finalized = execute_channel_closure_through_safe(
+                SafeSingleton::new(*safe, provider.clone()),
+                safe_owner_key.clone(),
+                channels.clone(),
+                ChannelClosureAction::FinalizeOutgoingClosure,
+                node,
+                &destinations,
+                batch_size,
+            )
+            .await?;
+            info!("node {:?}: {} outgoing channels are closed", node, finalized);
+            summary.outgoing_finalized += finalized;
+        }
+
+        pending = not_due;
+        if let Some(next_due) = pending.iter().map(|p| p.closure_time).min() {
+            info!(
+                "{} outgoing channels are pending to close; the next one can be finalized after timestamp {}",
+                pending.len(),
+                next_due
+            );
+            wait_until_block_timestamp_passed(provider.as_ref(), next_due, poll_interval).await?;
+        }
+    }
+
+    Ok(summary)
 }
 
 #[cfg(test)]
