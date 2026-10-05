@@ -156,7 +156,7 @@ hopli faucet \
 
 ### 3. Safe module create/move/migrate
 
-Create safe + module setup:
+Create a Safe and node management module:
 
 ```bash
 hopli safe-module create \
@@ -166,11 +166,33 @@ hopli safe-module create \
   --password-path ./secrets/identity.pwd \
   --admin-address 0xAdmin1...,0xAdmin2... \
   --threshold 1 \
-  --allowance 10 \
+  --allowance 10.5 \
   --hopr-amount 10 \
   --native-amount 0.1 \
   --private-key <PRIVATE_KEY>
 ```
+
+Nodes come from the supplied identity files and any `--node-address` values. Use
+`--admin-address` to choose the Safe's owners; omitting it makes the transaction signer
+the sole owner. `--threshold` defaults to 1 and must not exceed the number of owners.
+
+For `safe-module create`, `--allowance` sets how many HOPR tokens the channels contract
+can transfer from the new Safe. Amounts use whole-token units and are converted to
+18-decimal base units: `10.5` is stored as `10500000000000000000`.
+
+| Allowance option   | Result                                                                           |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `--allowance 10.5` | Sets the channels allowance to exactly 10.5 HOPR, replacing the factory default. |
+| `--allowance 0`    | Sets the channels allowance to zero.                                             |
+| Omitted            | Keeps the allowance configured by the factory.                                   |
+
+Allowance and funding are separate: `--hopr-amount` funds the Safe, while `--allowance`
+sets spending permission. Verify the allowance by calling `allowance(safe, channels)`
+on the HOPR token contract.
+
+The command prints the deployed Safe and module addresses, then performs any requested
+funding. `--native-amount` is the amount sent to each node. Funding uses separate
+transactions, so a funding error leaves the Safe and module deployed.
 
 Migrate existing safe/module to another network config:
 

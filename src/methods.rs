@@ -20,7 +20,10 @@ use hopr_bindings::{
     },
     exports::alloy::{
         network::{EthereumWallet, TransactionBuilder},
-        primitives::{Address, B256, Bytes, U256, keccak256, utils::format_units},
+        primitives::{
+            Address, B256, Bytes, U256, keccak256,
+            utils::{format_units, parse_units},
+        },
         providers::{
             CallInfoTrait, CallItem, Identity, MULTICALL3_ADDRESS, MulticallBuilder, MulticallError, Provider,
             RootProvider, WalletProvider,
@@ -701,22 +704,33 @@ pub async fn deploy_safe_module_for_single_edge_node<P: WalletProvider + Provide
     Ok((deployed_safe, deployed_module))
 }
 
-/// Deploy a safe and a module proxies via v4 HoprStakeFactory contract with default permissions and announcement
-/// targets With the multicall contract, it deploys a safe proxy instance and a module proxy instance with multicall as
-/// an owner, and completes necessary setup.
-/// Then the multicall includes some additional steps:
-/// 1. if node addresses are known, include nodes to the module by safe
-/// 2. transfer safe ownership to actual admins
-/// 3. set desired threshold
+/// Deploy Safe and node management module proxies through the stake factory in one multicall.
 ///
-/// Returns safe proxy address and module proxy address
+/// The factory configures the module's default targets and permissions. Multicall temporarily owns the Safe to:
+///
+/// 1. Include any supplied node addresses in the module.
+/// 2. Set the channels contract's token allowance when `allowance` is provided.
+/// 3. Remove itself as an owner, leaving `admins` with the requested `threshold`.
+///
+/// `allowance` is expressed in whole HOPR tokens and converted to 18-decimal base units. For example,
+/// `Some(10.5)` sets `HoprToken.allowance(safe, hopr_channels_address)` to `10_500_000_000_000_000_000`.
+/// A provided value replaces the factory allowance; `Some(0.0)` clears it and `None` preserves it.
+/// This grants spending permission to the channels contract; it does not fund the Safe.
+///
+/// Returns contract instances for the deployed Safe and module proxies.
+///
+/// # Panics
+///
+/// Panics if `admins` is empty, contains Multicall3, or `threshold` is outside `1..=admins.len()`.
 #[allow(clippy::too_many_arguments)]
 pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provider>(
     hopr_node_stake_factory: HoprNodeStakeFactoryInstance<Arc<P>>,
     hopr_channels_address: Address,
+    hopr_token_address: Address,
     node_addresses: Vec<Address>,
     admins: Vec<Address>,
     threshold: U256,
+    allowance: Option<f64>,
 ) -> Result<(SafeSingletonInstance<Arc<P>>, HoprNodeManagementModuleInstance<Arc<P>>), HelperErrors> {
     let caller = hopr_node_stake_factory.provider().default_signer_address();
     let provider = hopr_node_stake_factory.provider();
@@ -732,7 +746,7 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         "multicall contract cannot be an admin"
     );
 
-    // build a new temporary admin
+    // Multicall3 needs temporary ownership to execute the Safe's setup calls in this transaction.
     let mut temporary_admins: Vec<Address> = admins.clone();
     temporary_admins.insert(0, MULTICALL3_ADDRESS);
     info!(
@@ -744,7 +758,7 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
     // build the default permissions of capabilities
     let default_target = build_default_target(hopr_channels_address)?;
 
-    // salt nonce
+    // Derive a deployment salt from the signer's address and pending transaction nonce.
     let curr_nonce = provider
         .get_transaction_count(caller)
         .pending()
@@ -815,7 +829,32 @@ pub async fn deploy_safe_module_with_targets_and_nodes<P: WalletProvider + Provi
         info!("No node has been provided. Skip node inclusion action for multicall payload generation");
     }
 
-    // renounce ownership granted to multicall so that only actual admins are included. Set the threshold.
+    // Execute approve through the Safe so the token contract records the Safe as the token owner
+    // and the channels contract as spender. None preserves the factory allowance; Some(0.0) clears it.
+    if let Some(allowance_amount) = allowance {
+        let allowance_to_be_approved: U256 = parse_units(&allowance_amount.to_string(), "ether")
+            .map_err(|_| HelperErrors::ParseError("Failed to parse allowance amount units".into()))?
+            .into();
+
+        let approve_payload = approveCall {
+            spender: hopr_channels_address,
+            value: allowance_to_be_approved,
+        }
+        .abi_encode();
+
+        let multicall_payload_6 = prepare_safe_tx_multicall_payload_from_owner_contract(
+            safe_address,
+            hopr_token_address,
+            caller,
+            approve_payload,
+        );
+
+        multicall_payloads.push(multicall_payload_6.to_call3());
+        info!("Allowance approval multicall payload is created");
+    }
+
+    // Keep this last: earlier setup calls need Multicall3's ownership and the initial threshold.
+    // Remove the temporary owner and activate the requested signature threshold together.
     let remove_owner_tx_payload = removeOwnerCall {
         prevOwner: Address::from_str(SENTINEL_OWNERS)
             .map_err(|e| HelperErrors::ParseError(format!("Invalid SENTINEL_OWNERS address: {e}")))?,
@@ -2312,9 +2351,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             node_addresses.clone(),
             admin_addresses.clone(),
             U256::from(2),
+            None,
         )
         .await?;
 
@@ -2358,6 +2399,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_deploy_safe_and_module_with_allowance() -> anyhow::Result<()> {
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client, anvil.addresses()[1]).await?;
+
+        // Expected values are in token base units (18 decimals), independent of the
+        // conversion used by the deployment helper. None preserves the factory default.
+        for (allowance, expected) in [
+            (None, 1_000_000_000_000_000_000_000_u128),
+            (Some(10.5), 10_500_000_000_000_000_000_u128),
+            (Some(2_000.0), 2_000_000_000_000_000_000_000_u128),
+            (Some(0.0), 0_u128),
+        ] {
+            let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
+                Clone::clone(&instances.stake_factory),
+                *instances.channels.address(),
+                *instances.token.address(),
+                vec![anvil.addresses()[2]],
+                vec![anvil.addresses()[0], anvil.addresses()[1]],
+                U256::from(2),
+                allowance,
+            )
+            .await?;
+
+            let on_chain_allowance = instances
+                .token
+                .allowance(*safe.address(), *instances.channels.address())
+                .call()
+                .await?;
+            assert_eq!(
+                on_chain_allowance,
+                U256::from(expected),
+                "channels allowance should match the requested allowance {allowance:?}"
+            );
+            assert_eq!(
+                instances
+                    .token
+                    .allowance(*safe.address(), *safe.address())
+                    .call()
+                    .await?,
+                U256::ZERO,
+                "deployment should not approve the Safe itself as spender"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_safe_tx_via_multisend() -> anyhow::Result<()> {
         // set allowance for token transfer for the safe multiple times
         let _ = env_logger::builder().is_test(true).try_init();
@@ -2385,9 +2483,11 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             vec![a2h(contract_deployer.public().to_address())],
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2485,9 +2585,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             deployer_vec.clone(),
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2566,9 +2668,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2633,9 +2737,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2697,9 +2803,11 @@ mod tests {
         let (_safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             vec![],
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2735,9 +2843,11 @@ mod tests {
         let (safe, node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             node_addresses.clone(),
             admin_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
@@ -2832,9 +2942,11 @@ mod tests {
         let (safe, _node_module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             *instances.channels.address(),
+            *instances.token.address(),
             deployer_vec.clone(),
             deployer_vec.clone(),
             U256::from(1),
+            None,
         )
         .await?;
 
