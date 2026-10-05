@@ -33,6 +33,12 @@ use tracing::debug;
 
 use crate::utils::HelperErrors;
 
+/// Default number of channel operations bundled into a single Safe transaction.
+///
+/// Each operation costs roughly 50k-100k gas, so a batch of 30 stays well below the
+/// block gas limit of Gnosis chain.
+pub const DEFAULT_CHANNEL_BATCH_SIZE: usize = 30;
+
 /// On-chain value of `HoprChannelsType.ChannelStatus.CLOSED`
 pub const ONCHAIN_CHANNEL_STATUS_CLOSED: u8 = 0;
 /// On-chain value of `HoprChannelsType.ChannelStatus.OPEN`

@@ -32,6 +32,7 @@ use hopr_bindings::{
         sol,
         sol_types::{SolCall, SolValue},
     },
+    hopr_channels::HoprChannels::{HoprChannelsInstance, channelsReturn},
     hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
         removeNodeCall, scopeTargetServiceRegistryCall, scopeTargetTokenCall,
@@ -47,6 +48,7 @@ use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
+    channels::{ChannelClosureAction, get_channel_id},
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
     utils::{HelperErrors, build_default_target, get_create2_address},
 };
@@ -1506,6 +1508,151 @@ pub async fn fill_node_registry_status<P: Provider>(
         node.registered_safe = Some(node_safe_registry.nodeToSafe(node.address).call().await?);
     }
     Ok(())
+}
+
+/// Make sure that the signer can execute Safe transactions alone, i.e. it is an owner of the Safe
+/// and the Safe threshold is one.
+pub async fn ensure_safe_executable_by_signer<P: Provider>(
+    safe: SafeSingletonInstance<P>,
+    signer: Address,
+) -> Result<(), HelperErrors> {
+    let provider = safe.provider();
+    let (owners, threshold) = provider
+        .multicall()
+        .add(safe.getOwners())
+        .add(safe.getThreshold())
+        .aggregate()
+        .await?;
+    let reason = if !owners.contains(&signer) {
+        Some("signer is not an owner".to_string())
+    } else if threshold != U256::ONE {
+        Some(format!("threshold is {threshold}, but only threshold 1 is supported"))
+    } else {
+        None
+    };
+    match reason {
+        Some(reason) => Err(HelperErrors::NotSafeExecutor {
+            signer: format!("{signer:?}"),
+            safe: format!("{:?}", safe.address()),
+            reason,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Execute a channel closure action for many counterparties of a node, through the Safe.
+///
+/// Counterparties are split into batches of at most `batch_size` items, to stay below the block gas limit.
+/// Each batch is one Safe transaction (signed by the Safe owner) that delegatecalls the MultiSend contract,
+/// which calls the HoprChannels contract once per counterparty. The Safe is the `msg.sender` of each call,
+/// which is required by the `*Safe` functions of HoprChannels.
+///
+/// Before sending, the on-chain status of each channel is checked and channels on which the action cannot be
+/// applied are skipped.
+///
+/// Returns the number of channels on which the action has been executed.
+pub async fn execute_channel_closure_through_safe<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    owner_chain_key: ChainKeypair,
+    channels: HoprChannelsInstance<Arc<P>>,
+    action: ChannelClosureAction,
+    node_address: Address,
+    counterparties: &[Address],
+    batch_size: usize,
+) -> Result<usize, HelperErrors> {
+    if batch_size == 0 {
+        return Err(HelperErrors::MissingParameter(
+            "batch size must be greater than zero".into(),
+        ));
+    }
+    // drop channels whose state indexed by Blokli is outdated, otherwise a whole batch reverts
+    let counterparties =
+        filter_counterparties_by_onchain_channel_status(&channels, action, node_address, counterparties).await?;
+    let channels_address = *channels.address();
+    let total_batches = counterparties.len().div_ceil(batch_size);
+    for (index, batch) in counterparties.chunks(batch_size).enumerate() {
+        // nonce must be read again for every batch, as the previous batch has increased it
+        let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+        let multisend_txns: Vec<MultisendTransaction> = batch
+            .iter()
+            .map(|counterparty| MultisendTransaction {
+                encoded_data: action.encode(node_address, *counterparty),
+                tx_operation: SafeTxOperation::Call,
+                to: channels_address,
+                value: U256::ZERO,
+            })
+            .collect();
+
+        send_multisend_safe_transaction_with_threshold_one(
+            safe.clone(),
+            owner_chain_key.clone(),
+            SAFE_MULTISEND_ADDRESS,
+            multisend_txns,
+            chain_id,
+            safe_nonce,
+        )
+        .await?;
+        info!(
+            "node {:?}: batch {}/{} done, {} {} ({:?})",
+            node_address,
+            index + 1,
+            total_batches,
+            batch.len(),
+            action.describe(),
+            batch
+        );
+    }
+    Ok(counterparties.len())
+}
+
+/// Read the on-chain state of channels, given as `(source, destination)` pairs, in chunks of Multicall3 calls
+async fn read_channel_states<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    endpoints: &[(Address, Address)],
+) -> Result<Vec<channelsReturn>, HelperErrors> {
+    // number of channel reads aggregated in one Multicall3 call
+    const READ_CHUNK_SIZE: usize = 100;
+
+    let mut states = Vec::with_capacity(endpoints.len());
+    for chunk in endpoints.chunks(READ_CHUNK_SIZE) {
+        let mut multicall = MulticallBuilder::new_dynamic(channels.provider());
+        for (source, destination) in chunk {
+            multicall = multicall.add_dynamic(channels.channels(get_channel_id(*source, *destination)));
+        }
+        states.extend(multicall.aggregate().await?);
+    }
+    Ok(states)
+}
+
+/// Keep only the counterparties whose channel with the node has an on-chain status accepted by the action
+pub async fn filter_counterparties_by_onchain_channel_status<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    action: ChannelClosureAction,
+    node_address: Address,
+    counterparties: &[Address],
+) -> Result<Vec<Address>, HelperErrors> {
+    let endpoints: Vec<(Address, Address)> = counterparties
+        .iter()
+        .map(|counterparty| action.channel_endpoints(node_address, *counterparty))
+        .collect();
+    let states = read_channel_states(channels, &endpoints).await?;
+
+    let mut accepted = Vec::with_capacity(counterparties.len());
+    for (counterparty, state) in counterparties.iter().zip(states) {
+        if action.accepts_onchain_status(state.status) {
+            accepted.push(*counterparty);
+        } else {
+            info!(
+                "node {:?}: skip channel with {:?}, its on-chain status {} does not allow to {}",
+                node_address,
+                counterparty,
+                state.status,
+                action.describe()
+            );
+        }
+    }
+    Ok(accepted)
 }
 
 pub type AnvilRpcClient = FillProvider<

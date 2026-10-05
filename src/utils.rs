@@ -167,6 +167,14 @@ pub enum HelperErrors {
     /// Error returned by the Blokli indexer client
     #[error(transparent)]
     BlokliError(#[from] blokli_client::BlokliClientError),
+
+    /// The signer cannot execute transactions on behalf of the Safe
+    #[error("signer {signer} cannot execute transactions of safe {safe}: {reason}")]
+    NotSafeExecutor {
+        signer: String,
+        safe: String,
+        reason: String,
+    },
 }
 
 // Used instead of From implementation to avoid alloy being a dependency of the primitive crates
