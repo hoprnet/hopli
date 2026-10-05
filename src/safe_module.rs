@@ -43,6 +43,8 @@
 //!     - read the on-chain closure time of every PendingToClose outgoing channel (closure initiation time plus
 //!       `NOTICE_PERIOD_CHANNEL_CLOSURE`)
 //!     - finalize the closure of each outgoing channel once its closure time has passed
+//!     - for each node whose identity file is provided, transfer its remaining xDAI to its Safe, keeping only the fee
+//!       of this last transfer
 //!
 //!   Channel operations are bundled into Safe transactions of at most `--batch-size` channels each.
 //!
@@ -150,7 +152,8 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
-//! - Decommission nodes by closing all their channels through their Safe
+//! - Decommission nodes by closing all their channels through their Safe, and returning the xDAI of the nodes
+//!   whose identity files are provided to their Safe
 //! ```text
 //! hopli safe-module decommission-nodes \
 //!     --network jura \
@@ -173,7 +176,11 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-use std::{collections::BTreeSet, str::FromStr, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    str::FromStr,
+    time::Duration,
+};
 
 use clap::{Parser, builder::RangedU64ValueParser};
 use hopr_bindings::{
@@ -186,7 +193,7 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
 };
-use hopr_types::crypto::keypairs::Keypair;
+use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{info, warn};
 
 use crate::{
@@ -199,7 +206,8 @@ use crate::{
         debug_node_safe_module_setup_main, debug_node_safe_module_setup_on_balance_and_registries,
         deploy_safe_module_with_targets_and_nodes, deregister_nodes_from_node_safe_registry_and_remove_from_module,
         ensure_safe_executable_by_signer, fill_node_registry_status, get_notice_period_channel_closure,
-        include_nodes_to_module, migrate_nodes, transfer_native_tokens, transfer_or_mint_tokens,
+        include_nodes_to_module, migrate_nodes, transfer_all_native_tokens, transfer_native_tokens,
+        transfer_or_mint_tokens,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -576,7 +584,8 @@ pub enum SafeModuleSubcommands {
         private_key: PrivateKeyArgs,
     },
 
-    /// Decommission nodes: close all their incoming and outgoing channels, on behalf of their Safe
+    /// Decommission nodes: close all their incoming and outgoing channels on behalf of their Safe, then return
+    /// the xDAI of the nodes whose identity files are provided to their Safe
     #[command(visible_alias = "dn")]
     DecommissionNodes {
         /// Network name, contracts config file root, and customized provider, if available
@@ -589,7 +598,8 @@ pub enum SafeModuleSubcommands {
 
         /// node addresses
         #[clap(
-            help = "Comma separated node Ethereum addresses. Not needed for nodes whose identity files are provided",
+            help = "Comma separated node Ethereum addresses. Not needed for nodes whose identity files are provided; \
+                    only nodes whose identity files are provided get their xDAI returned to the Safe",
             long,
             short = 'o',
             default_value = None
@@ -1433,6 +1443,8 @@ impl SafeModuleSubcommands {
     ///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
     ///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are
     ///    handled together, so the notice period is not waited once per node.
+    /// 5. For each node whose identity file is provided, transfer its remaining xDAI to its Safe, minus the fee of
+    ///    this last transfer. Nodes only given by address keep their xDAI, as their key is needed to sign.
     ///
     /// The channel closure itself is implemented by [close_all_channels_of_nodes].
     pub async fn execute_decommission_nodes(
@@ -1456,14 +1468,14 @@ impl SafeModuleSubcommands {
                 );
             }
         }
-        // if local identity dirs/path is provided, read addresses from identity files
-        node_eth_addresses.extend(
-            local_identity
-                .to_addresses()
-                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
-                .into_iter()
-                .map(a2h),
-        );
+        // if local identity dirs/path is provided, read the keys of the nodes from identity files,
+        // which are needed to return the xDAI of the nodes to their Safe
+        let node_keys: HashMap<Address, ChainKeypair> = local_identity
+            .to_chain_keys()?
+            .into_iter()
+            .map(|chain_key| (a2h(chain_key.public().to_address()), chain_key))
+            .collect();
+        node_eth_addresses.extend(node_keys.keys().copied());
         if node_eth_addresses.is_empty() {
             return Err(HelperErrors::MissingParameter(
                 "provide node addresses or identity files of the nodes".into(),
@@ -1519,6 +1531,20 @@ impl SafeModuleSubcommands {
             "all the channels of the nodes are closed: {} incoming closed, {} outgoing finalized",
             summary.incoming_closed, summary.outgoing_finalized
         );
+
+        // 5. return the xDAI of the nodes to their Safe, keeping only the fee of this last transfer
+        for NodeWithSafe { node, safe } in nodes {
+            let Some(node_key) = node_keys.get(&node) else {
+                info!(
+                    "node {:?}: no identity file is provided, its xDAI is not returned to the safe",
+                    node
+                );
+                continue;
+            };
+            let node_provider = network_provider.get_provider_with_signer(node_key).await?;
+            // logs the transferred amount
+            transfer_all_native_tokens(node_provider, safe).await?;
+        }
 
         Ok(())
     }
