@@ -1778,9 +1778,11 @@ mod tests {
         let (safe, _module) = deploy_safe_module_with_targets_and_nodes(
             instances.stake_factory,
             channels_address,
+            *instances.token.address(),
             vec![node],
             vec![node],
             U256::from(1),
+            None,
         )
         .await?;
 
