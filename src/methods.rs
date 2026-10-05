@@ -45,7 +45,7 @@ use hopr_bindings::{
     },
     hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
-    hopr_token::HoprToken::{HoprTokenInstance, approveCall},
+    hopr_token::HoprToken::{HoprTokenInstance, approveCall, transferCall},
 };
 use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
@@ -339,6 +339,81 @@ pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvide
         nonce,
     )
     .await
+}
+
+/// Split `total` evenly between `count` recipients. Returns the amount per recipient, and the remainder that
+/// cannot be split.
+pub fn split_evenly(total: U256, count: usize) -> (U256, U256) {
+    if count == 0 {
+        return (U256::ZERO, total);
+    }
+    let count = U256::from(count);
+    (total / count, total % count)
+}
+
+/// In one Safe transaction, transfer all the tokens of the Safe to `token_recipient`, and split all the native
+/// tokens of the Safe evenly between `native_recipients`. The remainder of the split stays in the Safe.
+///
+/// The fee of the Safe transaction is paid by the owner who executes it, not by the Safe.
+/// Returns the amount of tokens transferred and the amount of native tokens sent to each recipient.
+pub async fn transfer_safe_funds<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    owner_chain_key: ChainKeypair,
+    token: HoprTokenInstance<Arc<P>>,
+    token_recipient: Address,
+    native_recipients: &[Address],
+) -> Result<(U256, U256), HelperErrors> {
+    let safe_address = *safe.address();
+    let token_balance = token.balanceOf(safe_address).call().await?;
+    let native_balance = safe.provider().get_balance(safe_address).await?;
+    let (native_per_recipient, _) = split_evenly(native_balance, native_recipients.len());
+
+    let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
+    if !token_balance.is_zero() {
+        multisend_txns.push(MultisendTransaction {
+            encoded_data: transferCall {
+                recipient: token_recipient,
+                amount: token_balance,
+            }
+            .abi_encode()
+            .into(),
+            tx_operation: SafeTxOperation::Call,
+            to: *token.address(),
+            value: U256::ZERO,
+        });
+    }
+    if !native_per_recipient.is_zero() {
+        multisend_txns.extend(native_recipients.iter().map(|recipient| MultisendTransaction {
+            encoded_data: Bytes::new(),
+            tx_operation: SafeTxOperation::Call,
+            to: *recipient,
+            value: native_per_recipient,
+        }));
+    }
+    if multisend_txns.is_empty() {
+        info!("safe {:?} has no funds to transfer", safe_address);
+        return Ok((U256::ZERO, U256::ZERO));
+    }
+
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key,
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+    info!(
+        "safe {:?} transferred {} tokens to {:?}, and {} native tokens to each of {:?}",
+        safe_address,
+        format_units(token_balance, "ether").unwrap_or_else(|_| token_balance.to_string()),
+        token_recipient,
+        format_units(native_per_recipient, "ether").unwrap_or_else(|_| native_per_recipient.to_string()),
+        native_recipients
+    );
+    Ok((token_balance, native_per_recipient))
 }
 
 /// Get chain id and safe nonce
@@ -2203,6 +2278,73 @@ mod tests {
             U256::ZERO
         );
         assert_eq!(client.get_balance(dust_node_address).await?, U256::from(1_000));
+        Ok(())
+    }
+
+    #[test]
+    fn test_split_evenly() {
+        assert_eq!(split_evenly(U256::from(10), 3), (U256::from(3), U256::from(1)));
+        assert_eq!(split_evenly(U256::from(9), 3), (U256::from(3), U256::ZERO));
+        assert_eq!(split_evenly(U256::from(2), 3), (U256::ZERO, U256::from(2)));
+        assert_eq!(split_evenly(U256::from(5), 0), (U256::ZERO, U256::from(5)));
+    }
+
+    #[tokio::test]
+    async fn test_transfer_safe_funds_in_anvil() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch local anvil instance
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let deployer_address = a2h(contract_deployer.public().to_address());
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), deployer_address, anvil.addresses()[1]).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // a safe owned by the deployer, with some tokens and native tokens
+        let (safe, _) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            *instances.token.address(),
+            vec![],
+            vec![deployer_address],
+            U256::from(1),
+            None,
+        )
+        .await?;
+        let token_amount = U256::from(5_000_000_000_000_000_000_u128);
+        let native_amount = U256::from(1_000_000_000_000_000_001_u128);
+        transfer_or_mint_tokens(instances.token.clone(), vec![*safe.address()], vec![token_amount]).await?;
+        transfer_native_tokens(client.clone(), vec![*safe.address()], vec![native_amount]).await?;
+
+        let new_safe = get_random_address_for_testing();
+        let nodes: Vec<Address> = (0..3).map(|_| get_random_address_for_testing()).collect();
+        let (tokens, native_per_node) = transfer_safe_funds(
+            safe.clone(),
+            contract_deployer.clone(),
+            instances.token.clone(),
+            new_safe,
+            &nodes,
+        )
+        .await?;
+
+        let (expected_per_node, remainder) = split_evenly(native_amount, nodes.len());
+        assert_eq!(tokens, token_amount);
+        assert_eq!(native_per_node, expected_per_node);
+        assert_eq!(instances.token.balanceOf(new_safe).call().await?, token_amount);
+        assert_eq!(instances.token.balanceOf(*safe.address()).call().await?, U256::ZERO);
+        for node in &nodes {
+            assert_eq!(client.get_balance(*node).await?, expected_per_node);
+        }
+        assert_eq!(client.get_balance(*safe.address()).await?, remainder);
+
+        // nothing left to transfer: the remainder cannot be split
+        assert_eq!(
+            transfer_safe_funds(safe, contract_deployer, instances.token, new_safe, &nodes).await?,
+            (U256::ZERO, U256::ZERO)
+        );
         Ok(())
     }
 
