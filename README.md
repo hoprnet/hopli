@@ -258,19 +258,23 @@ hopli safe-module move \
 ```
 
 Decommission nodes by closing all their channels, on behalf of the Safe each node is registered with
-(the signer must be an owner of a Safe with threshold 1):
+(the signer must be an owner of a Safe with threshold 1), then returning the xDAI of the nodes to
+their Safe:
 
 ```bash
 hopli safe-module decommission-nodes \
   --network jura \
   --provider-url https://gnosis-rpc.example/ \
   --blokli-url https://blokli.jura.hoprnet.link \
-  --node-address 0xNode1...,0xNode2... \
+  --identity-directory ./identities \
+  --password-path ./secrets/identity.pwd \
   --private-key <SAFE_OWNER_PRIVATE_KEY>
 ```
 
-Instead of `--node-address`, node addresses can be derived from identity files
-(`--identity-directory` or `--identity-from-path` together with the identity password).
+Nodes can be given by identity files (`--identity-directory` or `--identity-from-path` together
+with the identity password) and/or by address (`--node-address 0xNode1...,0xNode2...`). Once the
+channels are closed, each node whose identity file is provided transfers its remaining xDAI to its
+Safe, keeping only the fee of this last transfer. Nodes given only by address keep their xDAI.
 Channel states are read from Blokli (`--blokli-url` or `HOPLI_BLOKLI_URL`). The command closes the
 incoming channels, initiates the closure of the open outgoing channels, and finalizes the closure
 of each outgoing channel once its own notice period is due (`NOTICE_PERIOD_CHANNEL_CLOSURE` after
