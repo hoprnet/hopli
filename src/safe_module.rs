@@ -35,6 +35,16 @@
 //! - [SafeModuleSubcommands::CheckSafe] inspects a Safe address and reports its setup: owners, threshold, attached
 //!   modules, the HOPR module's targets (channels/announcement), the linked nodes and their node-safe registry status,
 //!   and which known HOPR network configuration matches the on-chain state.
+//! - [SafeModuleSubcommands::DecommissionNodes] decommissions nodes by closing all their channels, on behalf of the
+//!   Safe each node is registered with. Channel states are read from a Blokli indexer. The signer must be an owner of
+//!   the Safe, and the Safe must have a threshold of 1. Detailed breakdown of the steps:
+//!     - close all the incoming channels (Open or PendingToClose) of every node
+//!     - initiate the closure of all the Open outgoing channels of every node
+//!     - read the on-chain closure time of every PendingToClose outgoing channel (closure initiation time plus
+//!       `NOTICE_PERIOD_CHANNEL_CLOSURE`)
+//!     - finalize the closure of each outgoing channel once its closure time has passed
+//!
+//!   Channel operations are bundled into Safe transactions of at most `--batch-size` channels each.
 //!
 //! Some sample commands
 //! - Express creation of a safe and a module
@@ -140,6 +150,19 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
+//! - Decommission nodes by closing all their channels through their Safe
+//! ```text
+//! hopli safe-module decommission-nodes \
+//!     --network jura \
+//!     --identity-directory "./test" \
+//!     --password-path "./test/pwd" \
+//!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+//!     --blokli-url "https://blokli.jura.hoprnet.link" \
+//!     --batch-size 30 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "https://gnosis-rpc.example/"
+//! ```
+//!
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -150,14 +173,20 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-use std::str::FromStr;
+use std::{
+    collections::{BTreeSet, HashMap},
+    str::FromStr,
+    time::Duration,
+};
 
+use blokli_client::types::ChannelStatus;
 use clap::{Parser, builder::RangedU64ValueParser};
 use hopr_bindings::{
     exports::alloy::{
         primitives::{Address, U256, utils::parse_units},
         providers::Provider,
     },
+    hopr_channels::HoprChannels,
     hopr_node_safe_registry::HoprNodeSafeRegistry,
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
@@ -166,6 +195,11 @@ use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{
+    channels::{
+        ChannelClosureAction, ChannelDirection, DEFAULT_CHANNEL_BATCH_SIZE, PendingOutgoingClosure,
+        get_channel_counterparties, get_node_key_id, group_destinations_by_node, merge_unique_addresses,
+        new_blokli_client, split_due_closures,
+    },
     environment_config::NetworkProviderArgs,
     key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
@@ -173,8 +207,10 @@ use crate::{
         create_new_module_and_include_nodes, create_new_module_include_nodes_and_remove_old_module,
         debug_node_safe_module_setup_main, debug_node_safe_module_setup_on_balance_and_registries,
         deploy_safe_module_with_targets_and_nodes, deregister_nodes_from_node_safe_registry_and_remove_from_module,
-        fill_node_registry_status, include_nodes_to_module, migrate_nodes, transfer_native_tokens,
-        transfer_or_mint_tokens,
+        ensure_safe_executable_by_signer, execute_channel_closure_through_safe, fill_node_registry_status,
+        get_latest_block_timestamp, get_notice_period_channel_closure, get_pending_outgoing_closures,
+        include_nodes_to_module, migrate_nodes,
+        transfer_native_tokens, transfer_or_mint_tokens, wait_until_block_timestamp_passed,
     },
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -547,6 +583,49 @@ pub enum SafeModuleSubcommands {
         module_address: String,
 
         /// Access to the private key of a safe owner
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Decommission nodes: close all their incoming and outgoing channels, on behalf of their Safe
+    #[command(visible_alias = "dn")]
+    DecommissionNodes {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses. Not needed for nodes whose identity files are provided",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// URL of the Blokli indexer of the network
+        #[clap(
+            help = "Blokli indexer URL, e.g. https://blokli.jura.hoprnet.link",
+            long,
+            short = 'b',
+            env = "HOPLI_BLOKLI_URL"
+        )]
+        blokli_url: String,
+
+        /// Maximum number of channels closed in one Safe transaction
+        #[clap(
+            help = "Maximum number of channels processed in one Safe transaction, to stay below the block gas limit",
+            long,
+            value_parser = RangedU64ValueParser::<usize>::new().range(1..=500),
+            default_value_t = DEFAULT_CHANNEL_BATCH_SIZE
+        )]
+        batch_size: usize,
+
+        /// Access to the private key of a Safe owner
         #[command(flatten)]
         private_key: PrivateKeyArgs,
     },
@@ -1353,6 +1432,204 @@ impl SafeModuleSubcommands {
 
         Ok(())
     }
+
+    /// Execute the command which decommissions nodes: it closes all the channels of the given nodes, on behalf of
+    /// the Safe each node is registered with in the Node-Safe registry.
+    ///
+    /// 1. Close all the incoming channels (Open or PendingToClose) of every node
+    /// 2. Initiate the closure of all the Open outgoing channels of every node
+    /// 3. Collect the PendingToClose outgoing channels of every node, i.e. those indexed by Blokli and those initiated
+    ///    in step 2 (which Blokli may not have indexed yet), and read their closure time on-chain
+    /// 4. Finalize the closure of each outgoing channel once its own closure time has passed, i.e. once
+    ///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
+    ///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are
+    ///    handled together, so the notice period is not waited once per node.
+    ///
+    /// Channels are read from Blokli; before sending each batch, their on-chain status is checked so that
+    /// channels already closed (or not yet indexed by Blokli) do not make the batch revert.
+    pub async fn execute_decommission_nodes(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        blokli_url: String,
+        batch_size: usize,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        /// Maximum interval between two checks of the chain time while waiting for the notice period
+        const WAIT_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+        // read all the node addresses, without duplicates
+        let mut node_eth_addresses: BTreeSet<Address> = BTreeSet::new();
+        if let Some(addresses) = node_address {
+            for addr in addresses.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+                node_eth_addresses.insert(
+                    Address::from_str(addr)
+                        .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?,
+                );
+            }
+        }
+        // if local identity dirs/path is provided, read addresses from identity files
+        node_eth_addresses.extend(
+            local_identity
+                .to_addresses()
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?
+                .into_iter()
+                .map(a2h),
+        );
+        if node_eth_addresses.is_empty() {
+            return Err(HelperErrors::MissingParameter(
+                "provide node addresses or identity files of the nodes".into(),
+            ));
+        }
+
+        // read private key
+        let signer_private_key = private_key.read_default()?;
+        let signer_address = a2h(signer_private_key.public().to_address());
+        // get RPC provider for the given network and environment
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+        let blokli = new_blokli_client(&blokli_url)?;
+
+        let channels = HoprChannels::new(contract_addresses.addresses.channels, rpc_provider.clone());
+        let node_safe_registry =
+            HoprNodeSafeRegistry::new(contract_addresses.addresses.node_safe_registry, rpc_provider.clone());
+
+        let notice_period = get_notice_period_channel_closure(channels.clone()).await?;
+        info!(
+            "NOTICE_PERIOD_CHANNEL_CLOSURE of network {} is {} seconds: outgoing channels can be finalized at the \
+             earliest this long after their closure is initiated",
+            network_provider.network, notice_period
+        );
+
+        // find the Safe and the Blokli key id of each node
+        let mut nodes: Vec<(Address, Address, u32)> = Vec::new();
+        let mut safes: HashMap<Address, Address> = HashMap::new();
+        let mut checked_safes: BTreeSet<Address> = BTreeSet::new();
+        for node in node_eth_addresses {
+            let safe_addr = node_safe_registry.nodeToSafe(node).call().await?;
+            if safe_addr.is_zero() {
+                warn!("node {:?} is not registered with any safe, skipping it", node);
+                continue;
+            }
+            if checked_safes.insert(safe_addr) {
+                ensure_safe_executable_by_signer(SafeSingleton::new(safe_addr, rpc_provider.clone()), signer_address)
+                    .await?;
+            }
+            match get_node_key_id(&blokli, node).await? {
+                Some(key_id) => {
+                    info!("node {:?} is registered with safe {:?}", node, safe_addr);
+                    safes.insert(node, safe_addr);
+                    nodes.push((node, safe_addr, key_id));
+                }
+                None => info!("node {:?} is not known by Blokli, it has no channel", node),
+            }
+        }
+
+        // counterparty addresses resolved from Blokli key ids
+        let mut address_cache = HashMap::new();
+
+        // 1. close incoming channels
+        for (node, safe_addr, key_id) in nodes.iter() {
+            let sources = get_channel_counterparties(
+                &blokli,
+                *key_id,
+                ChannelDirection::Incoming,
+                &[ChannelStatus::Open, ChannelStatus::PendingToClose],
+                &mut address_cache,
+            )
+            .await?;
+            let closed = execute_channel_closure_through_safe(
+                SafeSingleton::new(*safe_addr, rpc_provider.clone()),
+                signer_private_key.clone(),
+                channels.clone(),
+                ChannelClosureAction::CloseIncoming,
+                *node,
+                &sources,
+                batch_size,
+            )
+            .await?;
+            info!("node {:?}: {} incoming channels are closed", node, closed);
+        }
+
+        // 2. initiate the closure of open outgoing channels
+        let mut initiated: HashMap<Address, Vec<Address>> = HashMap::new();
+        for (node, safe_addr, key_id) in nodes.iter() {
+            let destinations = get_channel_counterparties(
+                &blokli,
+                *key_id,
+                ChannelDirection::Outgoing,
+                &[ChannelStatus::Open],
+                &mut address_cache,
+            )
+            .await?;
+            let count = execute_channel_closure_through_safe(
+                SafeSingleton::new(*safe_addr, rpc_provider.clone()),
+                signer_private_key.clone(),
+                channels.clone(),
+                ChannelClosureAction::InitiateOutgoingClosure,
+                *node,
+                &destinations,
+                batch_size,
+            )
+            .await?;
+            info!("node {:?}: closure of {} outgoing channels is initiated", node, count);
+            initiated.insert(*node, destinations);
+        }
+
+        // 3. collect the outgoing channels pending to close: those indexed by Blokli, and those initiated in step 2
+        //    (which Blokli may not have indexed yet), without duplicates. Their closure time is read on-chain, as it
+        //    depends on when the closure of each channel was initiated.
+        let mut pending: Vec<PendingOutgoingClosure> = Vec::new();
+        for (node, _, key_id) in nodes.iter() {
+            let indexed = get_channel_counterparties(
+                &blokli,
+                *key_id,
+                ChannelDirection::Outgoing,
+                &[ChannelStatus::PendingToClose],
+                &mut address_cache,
+            )
+            .await?;
+            let just_initiated = initiated.get(node).map(Vec::as_slice).unwrap_or_default();
+            let destinations = merge_unique_addresses([indexed.as_slice(), just_initiated]);
+            pending.extend(get_pending_outgoing_closures(&channels, *node, &destinations).await?);
+        }
+
+        // 4. finalize the closure of each outgoing channel once its own notice period is due,
+        //    waiting for the next due channel in between
+        while !pending.is_empty() {
+            let now = get_latest_block_timestamp(rpc_provider.as_ref()).await?;
+            let (due, not_due) = split_due_closures(pending, now);
+            for (node, destinations) in group_destinations_by_node(&due) {
+                let Some(safe_addr) = safes.get(&node) else {
+                    continue;
+                };
+                let finalized = execute_channel_closure_through_safe(
+                    SafeSingleton::new(*safe_addr, rpc_provider.clone()),
+                    signer_private_key.clone(),
+                    channels.clone(),
+                    ChannelClosureAction::FinalizeOutgoingClosure,
+                    node,
+                    &destinations,
+                    batch_size,
+                )
+                .await?;
+                info!("node {:?}: {} outgoing channels are closed", node, finalized);
+            }
+
+            pending = not_due;
+            if let Some(next_due) = pending.iter().map(|p| p.closure_time).min() {
+                info!(
+                    "{} outgoing channels are pending to close; the next one can be finalized after timestamp {}",
+                    pending.len(),
+                    next_due
+                );
+                wait_until_block_timestamp_passed(rpc_provider.as_ref(), next_due, WAIT_POLL_INTERVAL).await?;
+            }
+        }
+        info!("all the channels of the nodes are closed");
+
+        Ok(())
+    }
 }
 
 impl Cmd for SafeModuleSubcommands {
@@ -1534,6 +1811,24 @@ impl Cmd for SafeModuleSubcommands {
                     node_address,
                     safe_address,
                     module_address,
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::DecommissionNodes {
+                network_provider,
+                local_identity,
+                node_address,
+                blokli_url,
+                batch_size,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_decommission_nodes(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    blokli_url,
+                    batch_size,
                     private_key,
                 )
                 .await
