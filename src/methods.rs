@@ -7,7 +7,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use std::{ops::Add, str::FromStr, sync::Arc};
+use std::{ops::Add, str::FromStr, sync::Arc, time::Duration};
 
 use IMulticall3Extract::IMulticall3ExtractInstance;
 use SafeSingleton::{SafeSingletonInstance, execTransactionCall, removeOwnerCall, setupCall};
@@ -27,7 +27,7 @@ use hopr_bindings::{
             bindings::IMulticall3::{Call3, aggregate3Call},
             fillers::*,
         },
-        rpc::types::TransactionRequest,
+        rpc::types::{BlockNumberOrTag, TransactionRequest},
         signers::{Signer, local::PrivateKeySigner},
         sol,
         sol_types::{SolCall, SolValue},
@@ -48,7 +48,7 @@ use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
-    channels::{ChannelClosureAction, get_channel_id},
+    channels::{ChannelClosureAction, ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE, PendingOutgoingClosure, get_channel_id},
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
     utils::{HelperErrors, build_default_target, get_create2_address},
 };
@@ -1653,6 +1653,74 @@ pub async fn filter_counterparties_by_onchain_channel_status<P: Provider>(
         }
     }
     Ok(accepted)
+}
+
+/// Read the on-chain closure time of outgoing channels from the node to the given destinations.
+///
+/// Only channels that are `PENDING_TO_CLOSE` on-chain are returned, each with its own `closureTime`
+/// (block timestamp at which its closure was initiated plus `NOTICE_PERIOD_CHANNEL_CLOSURE`).
+pub async fn get_pending_outgoing_closures<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    node_address: Address,
+    destinations: &[Address],
+) -> Result<Vec<PendingOutgoingClosure>, HelperErrors> {
+    let endpoints: Vec<(Address, Address)> = destinations
+        .iter()
+        .map(|destination| (node_address, *destination))
+        .collect();
+    let states = read_channel_states(channels, &endpoints).await?;
+
+    Ok(destinations
+        .iter()
+        .zip(states)
+        .filter(|(_, state)| state.status == ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE)
+        .map(|(destination, state)| PendingOutgoingClosure {
+            node: node_address,
+            destination: *destination,
+            closure_time: u64::from(state.closureTime),
+        })
+        .collect())
+}
+
+/// Get the notice period (in seconds) between initiating and finalizing the closure of an outgoing channel
+pub async fn get_notice_period_channel_closure<P: Provider>(
+    channels: HoprChannelsInstance<P>,
+) -> Result<u64, HelperErrors> {
+    let notice_period = channels.NOTICE_PERIOD_CHANNEL_CLOSURE().call().await?;
+    Ok(u64::from(notice_period))
+}
+
+/// Get the timestamp of the latest block
+pub async fn get_latest_block_timestamp<P: Provider>(provider: &P) -> Result<u64, HelperErrors> {
+    let block = provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await?
+        .ok_or_else(|| HelperErrors::MiddlewareError("latest block not found".into()))?;
+    Ok(block.header.timestamp)
+}
+
+/// Wait until the chain has produced a block whose timestamp is strictly greater than `target_timestamp`.
+///
+/// The chain time is used (instead of the local clock) because the channel closure notice period
+/// is checked against `block.timestamp` on-chain.
+pub async fn wait_until_block_timestamp_passed<P: Provider>(
+    provider: &P,
+    target_timestamp: u64,
+    max_poll_interval: Duration,
+) -> Result<(), HelperErrors> {
+    loop {
+        let now = get_latest_block_timestamp(provider).await?;
+        if now > target_timestamp {
+            return Ok(());
+        }
+        let remaining = target_timestamp - now + 1;
+        info!("waiting for {remaining} more seconds until the chain time passes {target_timestamp}");
+        // poll at least every second, at most every `max_poll_interval`
+        let sleep_for = Duration::from_secs(remaining)
+            .min(max_poll_interval)
+            .max(Duration::from_secs(1));
+        tokio::time::sleep(sleep_for).await;
+    }
 }
 
 pub type AnvilRpcClient = FillProvider<

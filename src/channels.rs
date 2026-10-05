@@ -129,6 +129,49 @@ impl ChannelClosureAction {
     }
 }
 
+/// Outgoing channel of a node whose closure has been initiated, with its on-chain closure time
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingOutgoingClosure {
+    /// Source of the channel
+    pub node: Address,
+    /// Destination of the channel
+    pub destination: Address,
+    /// `closureTime` of the channel: the block timestamp at which its closure was initiated, plus
+    /// `NOTICE_PERIOD_CHANNEL_CLOSURE`
+    pub closure_time: u64,
+}
+
+/// Whether the closure of an outgoing channel can be finalized in a block with the given timestamp.
+///
+/// `finalizeOutgoingChannelClosure` reverts with `NoticePeriodNotDue` while
+/// `closureTime >= block.timestamp`, so the closure is due only once `block.timestamp > closureTime`.
+/// Since `closureTime` depends on when the closure of each channel was initiated, this is checked per channel.
+pub fn is_closure_due(closure_time: u64, block_timestamp: u64) -> bool {
+    block_timestamp > closure_time
+}
+
+/// Split pending closures into those which are due at the given block timestamp, and those which are not yet
+pub fn split_due_closures(
+    pending: Vec<PendingOutgoingClosure>,
+    block_timestamp: u64,
+) -> (Vec<PendingOutgoingClosure>, Vec<PendingOutgoingClosure>) {
+    pending
+        .into_iter()
+        .partition(|p| is_closure_due(p.closure_time, block_timestamp))
+}
+
+/// Group the destinations of pending closures by node, keeping the order of nodes and destinations
+pub fn group_destinations_by_node(pending: &[PendingOutgoingClosure]) -> Vec<(Address, Vec<Address>)> {
+    let mut grouped: Vec<(Address, Vec<Address>)> = Vec::new();
+    for p in pending {
+        match grouped.iter_mut().find(|(node, _)| *node == p.node) {
+            Some((_, destinations)) => destinations.push(p.destination),
+            None => grouped.push((p.node, vec![p.destination])),
+        }
+    }
+    grouped
+}
+
 /// Create a Blokli client from its base URL, e.g. `https://blokli.jura.hoprnet.link`
 pub fn new_blokli_client(blokli_url: &str) -> Result<BlokliClient, HelperErrors> {
     let url = blokli_url
@@ -370,6 +413,46 @@ mod tests {
             hopr_types::internal::channels::generate_channel_id(&crate::utils::h2a(NODE), &crate::utils::h2a(PEER_A));
         assert_eq!(get_channel_id(NODE, PEER_A).as_slice(), expected.as_ref());
         assert_ne!(get_channel_id(NODE, PEER_A), get_channel_id(PEER_A, NODE));
+    }
+
+    #[test]
+    fn test_closure_is_due_only_after_closure_time() {
+        // reverts with NoticePeriodNotDue while closureTime >= block.timestamp
+        assert!(!is_closure_due(1_000, 999));
+        assert!(!is_closure_due(1_000, 1_000));
+        assert!(is_closure_due(1_000, 1_001));
+    }
+
+    #[test]
+    fn test_split_and_group_due_closures() {
+        let pending = vec![
+            PendingOutgoingClosure {
+                node: NODE,
+                destination: PEER_A,
+                closure_time: 100,
+            },
+            PendingOutgoingClosure {
+                node: PEER_C,
+                destination: PEER_A,
+                closure_time: 150,
+            },
+            PendingOutgoingClosure {
+                node: NODE,
+                destination: PEER_B,
+                closure_time: 200,
+            },
+            PendingOutgoingClosure {
+                node: NODE,
+                destination: PEER_C,
+                closure_time: 120,
+            },
+        ];
+        let (due, not_due) = split_due_closures(pending, 150);
+        assert_eq!(group_destinations_by_node(&due), vec![(NODE, vec![PEER_A, PEER_C])]);
+        assert_eq!(
+            group_destinations_by_node(&not_due),
+            vec![(PEER_C, vec![PEER_A]), (NODE, vec![PEER_B])]
+        );
     }
 
     #[test]
