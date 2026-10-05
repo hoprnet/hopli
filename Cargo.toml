@@ -65,8 +65,8 @@ hopr-types = { version = "4.1.0", features = [
 
 [dev-dependencies]
 blokli-client = { version = "0.34.0", features = ["testing"] }
-env_logger = "0.11.11"
-tempfile   = "3.27.0"
+env_logger    = "0.11.11"
+tempfile      = "3.27.0"
 
 
 # Target-specific dependencies for memory allocators

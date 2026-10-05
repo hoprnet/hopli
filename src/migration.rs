@@ -1,12 +1,12 @@
 //! This module migrates HOPR nodes from a v3 network (e.g. dufour) to a network of the current contracts
 //! (e.g. jura-prod), in one go:
 //!
-//! 1. A new Safe and module pair is created on the new network, with the nodes included in the module. An existing
-//!    new Safe can be used instead.
+//! 1. A new Safe and module pair is created on the new network, with the nodes included in the module. An existing new
+//!    Safe can be used instead.
 //! 2. The old Safe of each node (as registered in the v3 Node-Safe registry) closes all the channels between the node
-//!    and the given counterparties, as well as the channels between the migrated nodes (see [`channel_candidates`]).
-//!    v3 networks are not indexed by Blokli, so the counterparties are provided by the user and the status of each
-//!    channel is read on-chain.
+//!    and the given counterparties, as well as the channels between the migrated nodes (see [`channel_candidates`]). v3
+//!    networks are not indexed by Blokli, so the counterparties are provided by the user and the status of each channel
+//!    is read on-chain.
 //! 3. Nodes whose key is available transfer their xDAI to their old Safe, keeping only the fee of this transfer.
 //! 4. Each old Safe transfers all its wxHOPR to the new Safe, and splits all its xDAI evenly between the nodes.
 //!

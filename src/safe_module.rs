@@ -47,9 +47,8 @@
 //!       of this last transfer
 //!
 //!   Channel operations are bundled into Safe transactions of at most `--batch-size` channels each.
-//! - [SafeModuleSubcommands::MigrateFromV3] migrates nodes from the dufour (v3) network to the given network in one
-//!   go. The old Safe and the new Safe may have different owners. Detailed breakdown of the steps (see
-//!   [crate::migration]):
+//! - [SafeModuleSubcommands::MigrateFromV3] migrates nodes from the dufour (v3) network to the given network in one go.
+//!   The old Safe and the new Safe may have different owners. Detailed breakdown of the steps (see [crate::migration]):
 //!     - create a new Safe and module pair on the given network, with the nodes included in the module (or use an
 //!       existing one with `--new-safe-address`)
 //!     - with the old Safe, close the channels on dufour between the nodes and the given counterparties, and between
@@ -175,7 +174,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "https://gnosis-rpc.example/"
 //! ```
-//!
+//! 
 //! - Migrate nodes from dufour (v3) to jura-prod, closing their channels with the given counterparties
 //! ```text
 //! hopli safe-module migrate-from-v3 \
@@ -188,7 +187,7 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "https://gnosis-rpc.example/"
 //! ```
-//!
+//! 
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -1561,8 +1560,8 @@ impl SafeModuleSubcommands {
     ///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
     ///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are
     ///    handled together, so the notice period is not waited once per node.
-    /// 5. For each node whose identity file is provided, transfer its remaining xDAI to its Safe, minus the fee of
-    ///    this last transfer. Nodes only given by address keep their xDAI, as their key is needed to sign.
+    /// 5. For each node whose identity file is provided, transfer its remaining xDAI to its Safe, minus the fee of this
+    ///    last transfer. Nodes only given by address keep their xDAI, as their key is needed to sign.
     ///
     /// The channel closure itself is implemented by [close_all_channels_of_nodes].
     pub async fn execute_decommission_nodes(

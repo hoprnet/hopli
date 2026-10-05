@@ -346,8 +346,8 @@ pub struct NodeChannelCandidates {
 /// 2. Initiate the closure of the outgoing channels that are Open on-chain
 /// 3. Read the closure time of the outgoing channels that are PendingToClose on-chain, i.e. those initiated in step 2
 ///    and those initiated before
-/// 4. Finalize the closure of each outgoing channel once its own closure time has passed, i.e. once
-///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
+/// 4. Finalize the closure of each outgoing channel once its own closure time has passed, i.e. once `block.timestamp >
+///    closureTime`, where `closureTime` is the timestamp of the block that included its
 ///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are handled
 ///    together, so the notice period is not waited once per node. The chain time is checked at most every
 ///    `poll_interval` while waiting.
@@ -413,8 +413,8 @@ where
         );
     }
 
-    // 4. finalize the closure of each outgoing channel once its own notice period is due,
-    //    waiting for the next due channel in between
+    // 4. finalize the closure of each outgoing channel once its own notice period is due, waiting for the next due
+    //    channel in between
     while !pending.is_empty() {
         let now = get_latest_block_timestamp(provider.as_ref()).await?;
         let (due, not_due) = split_due_closures(pending, now);
