@@ -94,14 +94,20 @@
               (fs.fileFilter (file: file.hasExt "py") ./.ci)
             ];
           };
+          # contract addresses of the HOPR v3 networks, embedded with `include_str!`
+          v3ContractsAddresses = ./config/v3.0.1-contracts-addresses.json;
           src = nixLib.mkSrc {
             root = ./.;
             inherit fs;
+            extraFiles = [ v3ContractsAddresses ];
           };
           testSrc = nixLib.mkTestSrc {
             root = ./.;
             inherit fs;
-            extraFiles = [ (fs.fileFilter (file: file.hasExt "snap") ./.) ];
+            extraFiles = [
+              (fs.fileFilter (file: file.hasExt "snap") ./.)
+              v3ContractsAddresses
+            ];
           };
 
           hopliPackages = import ./nix/packages/hopli.nix {
