@@ -2,12 +2,14 @@
 //! the `hopli` CLI.
 //!
 //! Main modules:
+//! - `channels`: query channels of nodes from Blokli
 //! - `identity`: create/read/update node identity files
 //! - `faucet`: distribute native/HOPR tokens to nodes
 //! - `safe_module`: create and operate Safe + module setups
 //! - `service`: read and write the on-chain registry of node services
 //! - `win_prob`: manage winning probability parameters
 
+pub mod channels;
 pub mod environment_config;
 pub mod faucet;
 pub mod identity;

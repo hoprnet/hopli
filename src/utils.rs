@@ -163,6 +163,10 @@ pub enum HelperErrors {
     // general error of parsing
     #[error("Cannot parse: {0}")]
     ParseError(String),
+
+    /// Error returned by the Blokli indexer client
+    #[error(transparent)]
+    BlokliError(#[from] blokli_client::BlokliClientError),
 }
 
 // Used instead of From implementation to avoid alloy being a dependency of the primitive crates
