@@ -266,9 +266,27 @@ where
 
 #[cfg(test)]
 mod tests {
-    use hopr_bindings::exports::alloy::primitives::address;
+    use hopr_bindings::{
+        config::ContractInstances,
+        constants::SAFE_MULTISEND_ADDRESS,
+        exports::alloy::{
+            primitives::{Bytes, address, aliases::U96},
+            sol_types::SolCall,
+        },
+        hopr_channels::HoprChannels::fundChannelSafeCall,
+        hopr_node_management_module::HoprNodeManagementModule,
+        hopr_node_stake_factory::HoprNodeStakeFactory,
+    };
 
     use super::*;
+    use crate::{
+        channels::{ONCHAIN_CHANNEL_STATUS_CLOSED, get_channel_id},
+        methods::{
+            MultisendTransaction, SafeTxOperation, create_rpc_client_to_anvil, get_chain_id_and_safe_nonce,
+            send_multisend_safe_transaction_with_threshold_one, transfer_native_tokens, transfer_or_mint_tokens,
+        },
+        utils::create_anvil,
+    };
 
     const NODE_1: Address = address!("1111111111111111111111111111111111111111");
     const NODE_2: Address = address!("2222222222222222222222222222222222222222");
@@ -316,5 +334,225 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].incoming_sources.is_empty());
         assert!(candidates[0].outgoing_destinations.is_empty());
+    }
+
+    /// Migrate two nodes from a v3-like network (a HoprChannels contract with a short notice period, and a
+    /// Node-Safe registry) to a new network, on Anvil. The old Safe and the new Safe have different owners.
+    /// - PEER -> NODE_1: open, closed as incoming channel; its balance returns to PEER
+    /// - NODE_1 -> PEER: open, closed as outgoing channel; its balance returns to the old Safe
+    /// - NODE_2 -> NODE_1: open, closed by NODE_2 as outgoing channel; its balance returns to the old Safe
+    #[tokio::test]
+    async fn test_migrate_nodes_from_v3_on_anvil() -> anyhow::Result<()> {
+        const NOTICE_PERIOD: u32 = 5;
+        let one_token = U256::from(1_000_000_000_000_000_000_u128);
+        let channel_balance = U96::from(1_000_000_000_000_000_000_u128);
+
+        let anvil = create_anvil(None);
+        // the deployer owns the new safe
+        let deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let deployer_address = a2h(deployer.public().to_address());
+        let client = create_rpc_client_to_anvil(&anvil, &deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), deployer_address, anvil.addresses()[1]).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // old (v3-like) network, and new network, sharing the token and the stake factory
+        let old_channels = HoprChannels::deploy(
+            client.clone(),
+            *instances.token.address(),
+            NOTICE_PERIOD,
+            *instances.safe_registry.address(),
+        )
+        .await?;
+        let old_network = V3NetworkAddresses {
+            channels: *old_channels.address(),
+            node_safe_registry: *instances.safe_registry.address(),
+            token: *instances.token.address(),
+        };
+        let new_registry = HoprNodeSafeRegistry::deploy(client.clone()).await?;
+        let new_channels = HoprChannels::deploy(
+            client.clone(),
+            *instances.token.address(),
+            NOTICE_PERIOD,
+            *new_registry.address(),
+        )
+        .await?;
+
+        // keys: owner of the old safe, nodes, and a peer without safe
+        let old_owner = ChainKeypair::random();
+        let old_owner_address = a2h(old_owner.public().to_address());
+        let node_keys = [ChainKeypair::random(), ChainKeypair::random()];
+        let nodes: Vec<Address> = node_keys.iter().map(|k| a2h(k.public().to_address())).collect();
+        let peer_key = ChainKeypair::random();
+        let peer = a2h(peer_key.public().to_address());
+        transfer_native_tokens(
+            client.clone(),
+            vec![old_owner_address, nodes[0], nodes[1], peer],
+            vec![U256::from(10) * one_token, one_token, one_token, one_token],
+        )
+        .await?;
+
+        // the old safe, created and owned by the old owner, with the nodes registered
+        let old_owner_client = create_rpc_client_to_anvil(&anvil, &old_owner);
+        let (old_safe, _) = deploy_safe_module_with_targets_and_nodes(
+            HoprNodeStakeFactory::new(*instances.stake_factory.address(), old_owner_client.clone()),
+            *old_channels.address(),
+            *instances.token.address(),
+            nodes.clone(),
+            vec![old_owner_address],
+            U256::ONE,
+            None,
+        )
+        .await?;
+        let node_clients: Vec<_> = node_keys
+            .iter()
+            .map(|k| create_rpc_client_to_anvil(&anvil, k))
+            .collect();
+        for node_client in &node_clients {
+            HoprNodeSafeRegistry::new(*instances.safe_registry.address(), node_client.clone())
+                .registerSafeByNode(*old_safe.address())
+                .send()
+                .await?
+                .watch()
+                .await?;
+        }
+        let old_safe_tokens = U256::from(10) * one_token;
+        let old_safe_xdai = U256::from(2) * one_token;
+        transfer_or_mint_tokens(
+            instances.token.clone(),
+            vec![*old_safe.address(), peer],
+            vec![old_safe_tokens, one_token],
+        )
+        .await?;
+        transfer_native_tokens(client.clone(), vec![*old_safe.address()], vec![old_safe_xdai]).await?;
+
+        // channels: the old safe opens NODE_1 -> PEER and NODE_2 -> NODE_1, PEER opens PEER -> NODE_1
+        let fund = |node: Address, destination: Address| MultisendTransaction {
+            encoded_data: Bytes::from(
+                fundChannelSafeCall {
+                    selfAddress: node,
+                    account: destination,
+                    amount: channel_balance,
+                }
+                .abi_encode(),
+            ),
+            tx_operation: SafeTxOperation::Call,
+            to: *old_channels.address(),
+            value: U256::ZERO,
+        };
+        let (chain_id, nonce) = get_chain_id_and_safe_nonce(old_safe.clone()).await?;
+        send_multisend_safe_transaction_with_threshold_one(
+            old_safe.clone(),
+            old_owner.clone(),
+            SAFE_MULTISEND_ADDRESS,
+            vec![fund(nodes[0], peer), fund(nodes[1], nodes[0])],
+            chain_id,
+            nonce,
+        )
+        .await?;
+        let peer_client = create_rpc_client_to_anvil(&anvil, &peer_key);
+        HoprToken::new(*instances.token.address(), peer_client.clone())
+            .approve(*old_channels.address(), one_token)
+            .send()
+            .await?
+            .watch()
+            .await?;
+        HoprChannels::new(*old_channels.address(), peer_client)
+            .fundChannel(nodes[0], channel_balance)
+            .send()
+            .await?
+            .watch()
+            .await?;
+        // tokens of the old safe, minus the two channels it funded
+        let old_safe_tokens = old_safe_tokens - U256::from(2) * one_token;
+
+        // from now on, Anvil mines a block every second, so that the chain time moves on while waiting for the
+        // notice period
+        client
+            .raw_request::<_, serde_json::Value>("evm_setIntervalMining".into(), [1])
+            .await?;
+
+        let summary = migrate_nodes_from_v3(V3Migration {
+            old_network,
+            old_owner_provider: old_owner_client.clone(),
+            old_owner_key: old_owner.clone(),
+            new_stake_factory: HoprNodeStakeFactory::new(*instances.stake_factory.address(), client.clone()),
+            new_channels: *new_channels.address(),
+            new_token: *instances.token.address(),
+            new_safe: NewSafe::Create {
+                admins: vec![deployer_address],
+                threshold: 1,
+                allowance: Some(100.0),
+            },
+            nodes: nodes.clone(),
+            node_providers: node_clients,
+            counterparties: vec![peer],
+            batch_size: 2,
+            poll_interval: Duration::from_secs(1),
+        })
+        .await?;
+
+        // the new safe is owned by the deployer, and its module includes the nodes
+        let new_safe = SafeSingleton::new(summary.new_safe, client.clone());
+        assert_eq!(new_safe.getOwners().call().await?, vec![deployer_address]);
+        let new_module = HoprNodeManagementModule::new(
+            summary.new_module.expect("the new module must be created"),
+            client.clone(),
+        );
+        for node in &nodes {
+            assert!(new_module.isNode(*node).call().await?, "node must be in the new module");
+        }
+        assert_eq!(
+            instances
+                .token
+                .allowance(summary.new_safe, *new_channels.address())
+                .call()
+                .await?,
+            U256::from(100) * one_token,
+            "the new channels contract must have the requested allowance"
+        );
+
+        // all the channels are closed on the old network
+        assert_eq!(
+            summary.channels,
+            ChannelClosureSummary {
+                incoming_closed: 1,
+                outgoing_initiated: 2,
+                outgoing_finalized: 2,
+            }
+        );
+        for (source, destination) in [(peer, nodes[0]), (nodes[0], peer), (nodes[1], nodes[0])] {
+            let channel = old_channels
+                .channels(get_channel_id(source, destination))
+                .call()
+                .await?;
+            assert_eq!(channel.status, ONCHAIN_CHANNEL_STATUS_CLOSED);
+        }
+
+        // the tokens of the old safe, including the balances of its outgoing channels, are in the new safe
+        let expected_tokens = old_safe_tokens + U256::from(2) * one_token;
+        assert_eq!(summary.tokens_to_new_safe, expected_tokens);
+        assert_eq!(
+            instances.token.balanceOf(summary.new_safe).call().await?,
+            expected_tokens
+        );
+        assert_eq!(instances.token.balanceOf(*old_safe.address()).call().await?, U256::ZERO);
+        assert_eq!(instances.token.balanceOf(peer).call().await?, one_token);
+
+        // the xDAI of the nodes and of the old safe is split evenly between the nodes
+        assert!(summary.xdai_per_node > old_safe_xdai / U256::from(2));
+        for node in &nodes {
+            assert_eq!(client.get_balance(*node).await?, summary.xdai_per_node);
+        }
+        assert!(client.get_balance(*old_safe.address()).await? < U256::from(nodes.len()));
+
+        // the old safe is otherwise unchanged
+        assert_eq!(old_safe.getOwners().call().await?, vec![old_owner_address]);
+        assert_eq!(
+            instances.safe_registry.nodeToSafe(nodes[0]).call().await?,
+            *old_safe.address()
+        );
+        Ok(())
     }
 }
