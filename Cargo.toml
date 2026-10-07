@@ -19,9 +19,18 @@ allocator-jemalloc = [
 allocator-mimalloc = [
   "dep:mimalloc",
 ] # Use mimalloc as the global allocator on Linux
-default = []
+default = ["hardware-wallets"]
+# Sign transactions with an account of a Ledger device (over USB, with libusb)
+ledger = ["dep:alloy-signer-ledger"]
+# Sign transactions with an account of a Trezor device (over USB, with libusb)
+trezor = ["dep:alloy-signer-trezor"]
+# Sign transactions with an account of a Ledger or Trezor device. Enabled by default; build with
+# `--no-default-features` to leave hardware wallet support (and libusb) out.
+hardware-wallets = ["ledger", "trezor"]
 
 [dependencies]
+alloy-signer-ledger = { version = "2.5.0", optional = true }
+alloy-signer-trezor = { version = "2.5.0", optional = true }
 alloy-transport-http = { version = "2.4.1", features = ["reqwest-default-tls"] }
 anyhow = "1.0.103"
 clap = { version = "4.6.1", features = ["derive", "env", "string"] }

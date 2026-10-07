@@ -17,14 +17,13 @@ use hopr_bindings::{
             },
         },
         rpc::client::ClientBuilder,
-        signers::local::PrivateKeySigner,
         transports::http::ReqwestTransport,
     },
 };
-use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
+use hopr_types::crypto::keypairs::ChainKeypair;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::HelperErrors;
+use crate::{signer::HopliSigner, utils::HelperErrors};
 
 type SharedFillerChain = JoinFill<
     JoinFill<JoinFill<JoinFill<Identity, ChainIdFiller>, NonceFiller<CachedNonceManager>>, GasFiller>,
@@ -101,8 +100,15 @@ impl NetworkProviderArgs {
             .ok_or_else(|| HelperErrors::UnknownNetwork)
     }
 
-    /// get the provider object
+    /// Get a provider that signs transactions with a private key held in memory
     pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors> {
+        self.get_provider_with_wallet(&HopliSigner::from_private_key(chain_key)?)
+            .await
+    }
+
+    /// Get a provider that signs transactions with the given signer, which can be a private key or a hardware
+    /// wallet
+    pub async fn get_provider_with_wallet(&self, signer: &HopliSigner) -> Result<Arc<RpcProvider>, HelperErrors> {
         // Build transport
         let parsed_url =
             url::Url::parse(self.provider_url.as_str()).map_err(|e| HelperErrors::ParseError(e.to_string()))?;
@@ -115,9 +121,6 @@ impl NetworkProviderArgs {
             rpc_client.set_poll_interval(std::time::Duration::from_millis(10));
         };
 
-        // build wallet
-        let wallet = PrivateKeySigner::from_slice(chain_key.secret().as_ref()).expect("failed to construct wallet");
-
         // Build default JSON RPC provider
         let provider = ProviderBuilder::new()
             .disable_recommended_fillers()
@@ -125,7 +128,7 @@ impl NetworkProviderArgs {
             .filler(NonceFiller::new(CachedNonceManager::default()))
             .filler(GasFiller::default())
             .filler(BlobGasFiller::default())
-            .wallet(wallet)
+            .wallet(signer.wallet())
             .connect_client(rpc_client);
 
         Ok(Arc::new(provider))
@@ -161,6 +164,7 @@ impl NetworkProviderArgs {
 #[cfg(test)]
 mod tests {
     use hopr_bindings::{config::ContractInstances, exports::alloy::providers::Provider};
+    use hopr_types::crypto::keypairs::Keypair;
 
     use super::*;
     use crate::{
@@ -186,6 +190,37 @@ mod tests {
 
         let chain_id = provider.get_chain_id().await?;
         assert_eq!(chain_id, anvil.chain_id());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_provider_with_wallet_sends_transactions_from_the_signer() -> anyhow::Result<()> {
+        use hopr_bindings::exports::alloy::{
+            network::TransactionBuilder,
+            primitives::{Address, U256},
+            providers::WalletProvider,
+            rpc::types::TransactionRequest,
+        };
+
+        let anvil = create_anvil_at_port(false);
+        let chain_key = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let signer = HopliSigner::from_private_key(&chain_key)?;
+        let network_provider_args = NetworkProviderArgs {
+            network: "anvil-localhost".into(),
+            contracts_root: None,
+            provider_url: anvil.endpoint(),
+        };
+
+        let provider = network_provider_args.get_provider_with_wallet(&signer).await?;
+        assert_eq!(provider.default_signer_address(), signer.address());
+
+        let recipient = Address::repeat_byte(0x42);
+        let tx = TransactionRequest::default()
+            .with_to(recipient)
+            .with_value(U256::from(1_000));
+        let receipt = provider.send_transaction(tx).await?.get_receipt().await?;
+        assert_eq!(receipt.from, signer.address());
+        assert_eq!(provider.get_balance(recipient).await?, U256::from(1_000));
         Ok(())
     }
 
