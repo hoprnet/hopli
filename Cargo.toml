@@ -24,6 +24,7 @@ default = []
 [dependencies]
 alloy-transport-http = { version = "2.4.1", features = ["reqwest-default-tls"] }
 anyhow = "1.0.103"
+blokli-client = { version = "0.34.0" }
 clap = { version = "4.6.1", features = ["derive", "env", "string"] }
 hex = "0.4.3"
 hex-literal = "1.1.0"
@@ -35,6 +36,7 @@ thiserror = "2.0.17"
 tokio = { version = "1.48.0", features = [
   "macros",
   "rt-multi-thread",
+  "time",
   "tracing",
 ] }
 tracing = { version = "0.1.43" }
@@ -62,8 +64,9 @@ hopr-types = { version = "4.1.0", features = [
 
 
 [dev-dependencies]
-env_logger = "0.11.11"
-tempfile   = "3.27.0"
+blokli-client = { version = "0.34.0", features = ["testing"] }
+env_logger    = "0.11.11"
+tempfile      = "3.27.0"
 
 
 # Target-specific dependencies for memory allocators
