@@ -5,15 +5,18 @@
 //!
 //! Location of identity files can be provided with [IdentityFileArgs].
 //!
-//! This module also contains definition of argument for private key, defined in [PrivateKeyArgs].
+//! This module also contains definition of argument for private key, defined in [PrivateKeyArgs]. Besides a private
+//! key, [PrivateKeyArgs] can select an account of a hardware wallet ([HardwareWalletArgs]). Arguments that select a
+//! signer implement [SignerArgs], which reads the [HopliSigner] they select.
 
 use std::{
     collections::HashMap,
     env, fs,
+    future::Future,
     path::{Path, PathBuf},
 };
 
-use clap::{Parser, ValueHint};
+use clap::{ArgGroup, Parser, ValueHint};
 use hopr_types::{
     crypto::keypairs::{ChainKeypair, Keypair},
     keypair::key_pair::{HoprKeys, IdentityRetrievalModes},
@@ -22,7 +25,10 @@ use hopr_types::{
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::utils::HelperErrors;
+use crate::{
+    signer::{HardwareAccount, HardwareWallet, HopliSigner},
+    utils::HelperErrors,
+};
 
 pub fn read_identity(file: &Path, password: &str) -> Result<(String, HoprKeys), HelperErrors> {
     let file_str = file
@@ -167,7 +173,124 @@ pub trait ArgEnvReader<T, K> {
     fn read_default(&self) -> Result<T, HelperErrors>;
 }
 
-/// Arguments for private key.
+/// Command line arguments that select the signer of transactions: a private key, or an account of a hardware
+/// wallet.
+///
+/// Implementors only tell where their private key and hardware wallet options are. [`SignerArgs::read_signer`] then
+/// connects to the hardware wallet when one is selected, and otherwise reads the private key from the command line,
+/// the environment variable [`SignerArgs::private_key_env`], or a prompt.
+///
+/// To select several signers in one command (e.g. the owners of two Safes), give each signer its own arguments
+/// struct with distinct flag names, and implement this trait for each of them.
+pub trait SignerArgs {
+    /// Private key given on the command line, if any
+    fn private_key(&self) -> Option<&str>;
+
+    /// Environment variable from which the private key is read when it is not given on the command line
+    fn private_key_env(&self) -> &'static str;
+
+    /// Hardware wallet selected on the command line, if any. It takes precedence over the private key.
+    fn hardware_wallet(&self) -> Option<HardwareWallet>;
+
+    /// Read the selected signer. `chain_id`, when known, is checked by hardware wallets against the chain id of
+    /// each transaction.
+    fn read_signer(&self, chain_id: Option<u64>) -> impl Future<Output = Result<HopliSigner, HelperErrors>> + Send
+    where
+        Self: Sync,
+    {
+        async move {
+            match self.hardware_wallet() {
+                Some(hardware_wallet) => HopliSigner::from_hardware_wallet(&hardware_wallet, chain_id).await,
+                None => HopliSigner::from_private_key(&read_private_key(self.private_key(), self.private_key_env())?),
+            }
+        }
+    }
+}
+
+/// Read a private key from the cli arg, or else from the environment variable `env_name`, or else from a prompt
+fn read_private_key(cli_arg: Option<&str>, env_name: &str) -> Result<ChainKeypair, HelperErrors> {
+    let pri_key = if let Some(pk) = cli_arg {
+        info!("Reading private key from CLI");
+        pk.to_owned()
+    } else if let Ok(env_pk) = env::var(env_name) {
+        info!("Reading private key from environment variable {:?}", env_name);
+        env_pk
+    } else if let Ok(prompt_pk) = rpassword::prompt_password("Enter private key:") {
+        info!("Reading private key from prompt");
+        prompt_pk
+    } else {
+        error!("Unable to read private key from environment variable: {:?}", env_name);
+        return Err(HelperErrors::UnableToReadPrivateKey(env_name.into()));
+    };
+
+    // trim the 0x prefix if needed
+    let priv_key_without_prefix = pri_key.strip_prefix("0x").unwrap_or(&pri_key).to_string();
+
+    let decoded_key = hex::decode(priv_key_without_prefix)
+        .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to decode private key: {e:?}")))?;
+    ChainKeypair::from_secret(&decoded_key)
+        .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to create keypair: {e:?}")))
+}
+
+/// Arguments that select an account of a hardware wallet to sign transactions.
+///
+/// The account is the first one of the device by default; `--hd-index` or `--hd-path` select another one.
+#[derive(Debug, Clone, Parser, Default)]
+#[command(group(ArgGroup::new("hardware_wallet").args(["ledger", "trezor"])))]
+pub struct HardwareWalletArgs {
+    /// Sign with a Ledger device
+    #[clap(
+        long,
+        help = "Sign transactions with a Ledger device (unlocked, with the Ethereum app open) instead of a private key"
+    )]
+    pub ledger: bool,
+
+    /// Sign with a Trezor device
+    #[clap(
+        long,
+        help = "Sign transactions with a Trezor device (unlocked) instead of a private key"
+    )]
+    pub trezor: bool,
+
+    /// Index of the account on the hardware wallet
+    #[clap(
+        long,
+        value_name = "INDEX",
+        requires = "hardware_wallet",
+        conflicts_with = "hd_path",
+        help = "Index of the hardware wallet account: m/44'/60'/<INDEX>'/0/0 on a Ledger (Ledger Live), \
+                m/44'/60'/0'/0/<INDEX> on a Trezor. Defaults to 0"
+    )]
+    pub hd_index: Option<usize>,
+
+    /// Derivation path of the account on the hardware wallet
+    #[clap(
+        long,
+        value_name = "PATH",
+        requires = "hardware_wallet",
+        help = "Custom derivation path of the hardware wallet account, e.g. m/44'/60'/0'/0/1"
+    )]
+    pub hd_path: Option<String>,
+}
+
+impl HardwareWalletArgs {
+    /// The selected hardware wallet, if any
+    pub fn selected(&self) -> Option<HardwareWallet> {
+        let account = match (&self.hd_path, self.hd_index) {
+            (Some(path), _) => HardwareAccount::DerivationPath(path.clone()),
+            (None, index) => HardwareAccount::Index(index.unwrap_or_default()),
+        };
+        if self.ledger {
+            Some(HardwareWallet::Ledger(account))
+        } else if self.trezor {
+            Some(HardwareWallet::Trezor(account))
+        } else {
+            None
+        }
+    }
+}
+
+/// Arguments for private key, or for an account of a hardware wallet used instead.
 #[derive(Debug, Clone, Parser, Default)]
 pub struct PrivateKeyArgs {
     /// Either provide a private key as argument or as the `PRIVATE_KEY` environment variable.
@@ -176,9 +299,28 @@ pub struct PrivateKeyArgs {
         short = 'k',
         help = "Private key to unlock the account that broadcasts the transaction",
         name = "private_key",
-        value_name = "PRIVATE_KEY"
+        value_name = "PRIVATE_KEY",
+        conflicts_with = "hardware_wallet"
     )]
     pub private_key: Option<String>,
+
+    /// Hardware wallet to use instead of a private key
+    #[command(flatten)]
+    pub hardware_wallet: HardwareWalletArgs,
+}
+
+impl SignerArgs for PrivateKeyArgs {
+    fn private_key(&self) -> Option<&str> {
+        self.private_key.as_deref()
+    }
+
+    fn private_key_env(&self) -> &'static str {
+        "PRIVATE_KEY"
+    }
+
+    fn hardware_wallet(&self) -> Option<HardwareWallet> {
+        self.hardware_wallet.selected()
+    }
 }
 
 impl ArgEnvReader<ChainKeypair, String> for PrivateKeyArgs {
@@ -189,30 +331,7 @@ impl ArgEnvReader<ChainKeypair, String> for PrivateKeyArgs {
 
     /// Read the value from either the cli arg or env
     fn read(&self, default_env_name: &str) -> Result<ChainKeypair, HelperErrors> {
-        let pri_key = if let Some(pk) = self.get_key() {
-            info!("Reading private key from CLI");
-            pk
-        } else if let Ok(env_pk) = env::var(default_env_name) {
-            info!("Reading private key from environment variable {:?}", default_env_name);
-            env_pk
-        } else if let Ok(prompt_pk) = rpassword::prompt_password("Enter private key:") {
-            info!("Reading private key from prompt");
-            prompt_pk
-        } else {
-            error!(
-                "Unable to read private key from environment variable: {:?}",
-                default_env_name
-            );
-            return Err(HelperErrors::UnableToReadPrivateKey(default_env_name.into()));
-        };
-
-        // trim the 0x prefix if needed
-        let priv_key_without_prefix = pri_key.strip_prefix("0x").unwrap_or(&pri_key).to_string();
-
-        let decoded_key = hex::decode(priv_key_without_prefix)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to decode private key: {e:?}")))?;
-        ChainKeypair::from_secret(&decoded_key)
-            .map_err(|e| HelperErrors::UnableToReadPrivateKey(format!("Failed to create keypair: {e:?}")))
+        read_private_key(self.private_key.as_deref(), default_env_name)
     }
 
     /// Read the default private key and return an address string
@@ -441,10 +560,80 @@ mod tests {
     const DUMMY_PRIVATE_KEY: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     const SPECIAL_ENV_KEY: &str = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
+    /// Command with the private key arguments, as flattened in hopli commands
+    #[derive(Debug, Parser)]
+    struct SignerCli {
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    }
+
+    fn parse_signer_args(args: &[&str]) -> Result<PrivateKeyArgs, clap::Error> {
+        SignerCli::try_parse_from(std::iter::once("hopli").chain(args.iter().copied())).map(|cli| cli.private_key)
+    }
+
+    #[test]
+    fn select_hardware_wallet_from_cli() -> anyhow::Result<()> {
+        assert_eq!(parse_signer_args(&[])?.hardware_wallet(), None);
+        assert_eq!(
+            parse_signer_args(&["--private-key", DUMMY_PRIVATE_KEY])?.hardware_wallet(),
+            None
+        );
+        assert_eq!(
+            parse_signer_args(&["--ledger"])?.hardware_wallet(),
+            Some(HardwareWallet::Ledger(HardwareAccount::Index(0)))
+        );
+        assert_eq!(
+            parse_signer_args(&["--trezor", "--hd-index", "3"])?.hardware_wallet(),
+            Some(HardwareWallet::Trezor(HardwareAccount::Index(3)))
+        );
+        assert_eq!(
+            parse_signer_args(&["--ledger", "--hd-path", "m/44'/60'/0'/0/1"])?.hardware_wallet(),
+            Some(HardwareWallet::Ledger(HardwareAccount::DerivationPath(
+                "m/44'/60'/0'/0/1".into()
+            )))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reject_conflicting_signer_args() {
+        for args in [
+            &["--ledger", "--trezor"][..],
+            &["--private-key", DUMMY_PRIVATE_KEY, "--ledger"][..],
+            &["--private-key", DUMMY_PRIVATE_KEY, "--trezor"][..],
+            &["--hd-index", "1"][..],
+            &["--hd-path", "m/44'/60'/0'/0/1"][..],
+            &["--ledger", "--hd-index", "1", "--hd-path", "m/44'/60'/0'/0/1"][..],
+        ] {
+            assert!(parse_signer_args(args).is_err(), "{args:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn hardware_wallet_flags_do_not_clash_with_command_flags() {
+        use clap::CommandFactory;
+
+        // panics on duplicate or inconsistent flags in any command taking a signer
+        crate::faucet::FaucetArgs::command().debug_assert();
+        crate::safe_module::SafeModuleSubcommands::command().debug_assert();
+        crate::service::ServiceSubcommands::command().debug_assert();
+        crate::win_prob::WinProbSubcommands::command().debug_assert();
+    }
+
+    #[tokio::test]
+    async fn read_signer_from_private_key() -> anyhow::Result<()> {
+        let args = parse_signer_args(&["--private-key", &format!("0x{DUMMY_PRIVATE_KEY}")])?;
+        let signer = args.read_signer(Some(100)).await?;
+        let expected = ChainKeypair::from_secret(&hex::decode(DUMMY_PRIVATE_KEY)?)?;
+        assert_eq!(signer.address(), crate::utils::a2h(expected.public().to_address()));
+        Ok(())
+    }
+
     #[test]
     fn read_pk_with_0x() -> anyhow::Result<()> {
         let private_key_args = PrivateKeyArgs {
             private_key: Some("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".to_string()),
+            ..Default::default()
         };
         let key = private_key_args.read_default()?;
 
@@ -689,9 +878,10 @@ mod tests {
     #[test]
     fn private_key_args_can_read_env_or_cli_args_in_different_scenarios() {
         // possible private key args
-        let pk_args_none = PrivateKeyArgs { private_key: None };
+        let pk_args_none = PrivateKeyArgs::default();
         let pk_args_some = PrivateKeyArgs {
             private_key: Some(DUMMY_PRIVATE_KEY.into()),
+            ..Default::default()
         };
 
         // when a special env is set but no cli arg, it returns the special env value

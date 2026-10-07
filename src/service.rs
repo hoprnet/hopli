@@ -1808,6 +1808,7 @@ mod tests {
         };
         let private_key = PrivateKeyArgs {
             private_key: Some(hex::encode(contract_deployer.secret().as_ref())),
+            ..Default::default()
         };
 
         // claim an open service type with non-zero burns, paying the global registration fee
