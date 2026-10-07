@@ -728,7 +728,6 @@ impl SafeModuleSubcommands {
                 hopr_node_safe_registry.clone(),
                 node_eth_addresses.clone(),
                 old_module_addr,
-                signer_private_key.clone(),
             )
             .await
             {
@@ -741,14 +740,7 @@ impl SafeModuleSubcommands {
             };
 
             // then include nodes to module
-            match include_nodes_to_module(
-                safe.clone(),
-                node_eth_addresses.clone(),
-                module_addr,
-                signer_private_key,
-            )
-            .await
-            {
+            match include_nodes_to_module(safe.clone(), node_eth_addresses.clone(), module_addr).await {
                 Ok(_) => {
                     info!("Nodes are included to the new module");
                 }
@@ -829,7 +821,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.token,
             contract_addresses.addresses.announcements,
             token_allowance,
-            signer_private_key,
         )
         .await?;
         info!("a new network has been included due to the migration");
@@ -980,7 +971,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
-            signer_private_key,
         )
         .await?;
         Ok(())
@@ -1039,7 +1029,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
-            signer_private_key,
         )
         .await?;
         Ok(())
@@ -1068,13 +1057,7 @@ impl SafeModuleSubcommands {
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
 
         // use the safe to add a new network/channel target to the existing module without creating or removing modules
-        add_new_network_target_to_module(
-            safe.clone(),
-            module_addr,
-            contract_addresses.addresses.channels,
-            signer_private_key,
-        )
-        .await?;
+        add_new_network_target_to_module(safe.clone(), module_addr, contract_addresses.addresses.channels).await?;
         Ok(())
     }
 
@@ -1105,7 +1088,6 @@ impl SafeModuleSubcommands {
             SafeSingleton::new(safe_addr, rpc_provider),
             module_addr,
             service_registry,
-            signer_private_key,
         )
         .await
     }
@@ -1345,7 +1327,7 @@ impl SafeModuleSubcommands {
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
 
-        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr, signer_private_key).await?;
+        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr).await?;
         info!(
             "Nodes {:?} have been included in module {:?} owned by safe {:?}",
             node_eth_addresses, module_addr, safe_addr

@@ -58,7 +58,6 @@ use hopr_bindings::{
     hopr_service_registry::HoprServiceRegistry::{self, Entry},
 };
 use hopr_types::{
-    crypto::keypairs::ChainKeypair,
     internal::prelude::{ServiceMetadata, ServiceType},
     primitive::prelude::ToHex,
 };
@@ -68,8 +67,7 @@ use crate::{
     environment_config::{NetworkProviderArgs, RpcProvider},
     key_pair::{ArgEnvReader, PrivateKeyArgs},
     methods::{
-        MultisendTransaction, SafeSingleton, SafeTxOperation, get_chain_id_and_safe_nonce,
-        send_multisend_safe_transaction_with_threshold_one,
+        MultisendTransaction, SafeSingleton, SafeTxOperation, send_multisend_safe_transaction_with_threshold_one,
     },
     payloads::{
         approve_hopr_token_payload, recover_service_registry_tokens_payload, register_service_type_payload,
@@ -626,22 +624,12 @@ fn multisend_leg(tx: TransactionRequest) -> Result<MultisendTransaction, HelperE
 async fn send_from_safe(
     rpc_provider: Arc<RpcProvider>,
     safe_address: Address,
-    signer_key: ChainKeypair,
     legs: Vec<TransactionRequest>,
 ) -> Result<(), HelperErrors> {
     let safe = SafeSingleton::new(safe_address, rpc_provider);
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
     let multisend_txns = legs.into_iter().map(multisend_leg).collect::<Result<Vec<_>, _>>()?;
 
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        signer_key,
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await
 }
 
 /// Sends `tx` from the caller's own key and waits for it to be mined.
@@ -701,7 +689,7 @@ impl ServiceSubcommands {
             &metadata,
         ));
 
-        send_from_safe(rpc_provider, safe, signer_private_key, legs).await
+        send_from_safe(rpc_provider, safe, legs).await
     }
 
     /// Replaces the metadata of the entry of `node` under `service_type`.
@@ -752,7 +740,7 @@ impl ServiceSubcommands {
             &metadata,
         ));
 
-        send_from_safe(rpc_provider, safe, signer_private_key, legs).await
+        send_from_safe(rpc_provider, safe, legs).await
     }
 
     /// Removes the entry of `node` under `service_type`.
@@ -781,7 +769,7 @@ impl ServiceSubcommands {
         );
 
         let leg = self_deregister_service_payload(addresses.service_registry, &service_type, node_address);
-        send_from_safe(rpc_provider, safe, signer_private_key, vec![leg]).await
+        send_from_safe(rpc_provider, safe, vec![leg]).await
     }
 
     /// Reads the entry of `node` under `service_type`, if it has one.
@@ -1329,7 +1317,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hopr_bindings::config::{ContractInstances, NetworksWithContractAddresses, SingleNetworkContractAddresses};
-    use hopr_types::{crypto::keypairs::Keypair, primitive::prelude::BytesRepresentable};
+    use hopr_types::{
+        crypto::keypairs::{ChainKeypair, Keypair},
+        primitive::prelude::BytesRepresentable,
+    };
 
     use super::*;
     use crate::{
