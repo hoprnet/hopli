@@ -75,7 +75,6 @@
 //!     --new-safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
 //!     --new-module-address 0x3086c20265cf742b169b05cd0eae1941455e4e9f \
 //!     --node-address 0x93a50B0fFF7b4ED36A3C6445e280E72AC2AEFc51,0x58033D3074D001a32bF379801eaf8969817fFfCf,0xeEDaab91158928647a9270Fe290897eBB1230250 \
-//!     --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //!
@@ -167,7 +166,7 @@ use tracing::{info, warn};
 
 use crate::{
     environment_config::NetworkProviderArgs,
-    key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
+    key_pair::{ArgEnvReader, IdentityFileArgs, PrivateKeyArgs},
     methods::{
         SafeSingleton, add_new_network_target_to_module, add_service_registry_target_to_module, check_safe_setup,
         create_new_module_and_include_nodes, create_new_module_include_nodes_and_remove_old_module,
@@ -252,11 +251,6 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
-
-        /// Accepted for backwards compatibility. Currently unused — network-registry
-        /// registration is no longer performed by this command.
-        #[command(flatten, name = "manager_private_key")]
-        manager_private_key: ManagerPrivateKeyArgs,
     },
 
     /// Migrate safe and module to a new network
@@ -338,11 +332,6 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
-
-        /// Accepted for backwards compatibility. Currently unused — network-registry
-        /// registration is no longer performed by this command.
-        #[command(flatten, name = "manager_private_key")]
-        manager_private_key: ManagerPrivateKeyArgs,
     },
 
     /// Debug safe and module setup
