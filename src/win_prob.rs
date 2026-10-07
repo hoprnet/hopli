@@ -30,7 +30,7 @@ use tracing::{debug, info};
 
 use crate::{
     environment_config::NetworkProviderArgs,
-    key_pair::{ArgEnvReader, PrivateKeyArgs},
+    key_pair::{PrivateKeyArgs, SignerArgs},
     utils::{Cmd, HelperErrors},
 };
 
@@ -91,10 +91,10 @@ impl WinProbSubcommands {
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
         // Read the private key from arguments or the "PRIVATE_KEY" environment variable
-        let signer_private_key = private_key.read("PRIVATE_KEY")?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
 
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_win_prob = HoprWinningProbabilityOracle::new(

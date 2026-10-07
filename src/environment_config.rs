@@ -100,6 +100,11 @@ impl NetworkProviderArgs {
             .ok_or_else(|| HelperErrors::UnknownNetwork)
     }
 
+    /// Chain id of the network, if the network is known
+    pub fn chain_id(&self) -> Option<u64> {
+        self.get_network_details_from_name().ok().map(|n| n.chain_id)
+    }
+
     /// Get a provider that signs transactions with a private key held in memory
     pub async fn get_provider_with_signer(&self, chain_key: &ChainKeypair) -> Result<Arc<RpcProvider>, HelperErrors> {
         self.get_provider_with_wallet(&HopliSigner::from_private_key(chain_key)?)
