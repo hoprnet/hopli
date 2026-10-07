@@ -258,8 +258,8 @@ hopli safe-module move \
 ```
 
 Decommission nodes by closing all their channels, on behalf of the Safe each node is registered with
-(the signer must be an owner of a Safe with threshold 1), then returning the xDAI of the nodes to
-their Safe:
+(the signer must be an owner of a Safe with threshold 1), then returning the xDAI of the nodes whose
+identity files are provided to their Safe:
 
 ```bash
 hopli safe-module decommission-nodes \
