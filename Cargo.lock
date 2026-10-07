@@ -2881,6 +2881,7 @@ dependencies = [
  "lazy_static",
  "mimalloc",
  "rpassword",
+ "rusb",
  "serde",
  "serde_json",
  "tempfile",

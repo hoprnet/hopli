@@ -103,8 +103,8 @@ itself, so the device only signs transactions, never raw hashes; the Safe must h
 as with a private key.
 
 Hardware wallet support is enabled by default (cargo feature `hardware-wallets`, made of `ledger` and
-`trezor`). It talks to the devices over USB with libusb, which is built from source when it is not
-installed on the system. To leave it out:
+`trezor`). It talks to the devices over USB with libusb, which is always built from source, so no
+system libusb is needed. To leave it out:
 
 ```bash
 cargo build --release --no-default-features   # or --no-default-features --features ledger

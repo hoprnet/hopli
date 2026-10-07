@@ -21,9 +21,9 @@ allocator-mimalloc = [
 ] # Use mimalloc as the global allocator on Linux
 default = ["hardware-wallets"]
 # Sign transactions with an account of a Ledger device (over USB, with libusb)
-ledger = ["dep:alloy-signer-ledger"]
+ledger = ["dep:alloy-signer-ledger", "dep:rusb"]
 # Sign transactions with an account of a Trezor device (over USB, with libusb)
-trezor = ["dep:alloy-signer-trezor"]
+trezor = ["dep:alloy-signer-trezor", "dep:rusb"]
 # Sign transactions with an account of a Ledger or Trezor device. Enabled by default; build with
 # `--no-default-features` to leave hardware wallet support (and libusb) out.
 hardware-wallets = ["ledger", "trezor"]
@@ -38,6 +38,9 @@ hex = "0.4.3"
 hex-literal = "1.1.0"
 lazy_static = "1.5.0"
 rpassword = "7.5.4"
+# Not used directly: compiles the libusb bundled with libusb1-sys for the hardware wallets instead
+# of probing the system one, so builds need no installed libusb (nor `sw_vers` in the macOS Nix sandbox)
+rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.17"
@@ -113,4 +116,4 @@ split-debuginfo = "off"
 strip           = false
 
 [package.metadata.cargo-machete]
-ignored = ["alloy-transport-http"]
+ignored = ["alloy-transport-http", "rusb"]
