@@ -75,7 +75,6 @@
 //!     --new-safe-address 0xce66d19a86600f3c6eb61edd6c431ded5cc92b21 \
 //!     --new-module-address 0x3086c20265cf742b169b05cd0eae1941455e4e9f \
 //!     --node-address 0x93a50B0fFF7b4ED36A3C6445e280E72AC2AEFc51,0x58033D3074D001a32bF379801eaf8969817fFfCf,0xeEDaab91158928647a9270Fe290897eBB1230250 \
-//!     --manager-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //!
@@ -162,12 +161,11 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
 };
-use hopr_types::crypto::keypairs::Keypair;
 use tracing::{info, warn};
 
 use crate::{
     environment_config::NetworkProviderArgs,
-    key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
+    key_pair::{IdentityFileArgs, PrivateKeyArgs, SignerArgs},
     methods::{
         SafeSingleton, add_new_network_target_to_module, add_service_registry_target_to_module, check_safe_setup,
         create_new_module_and_include_nodes, create_new_module_include_nodes_and_remove_old_module,
@@ -252,11 +250,6 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
-
-        /// Accepted for backwards compatibility. Currently unused — network-registry
-        /// registration is no longer performed by this command.
-        #[command(flatten, name = "manager_private_key")]
-        manager_private_key: ManagerPrivateKeyArgs,
     },
 
     /// Migrate safe and module to a new network
@@ -338,11 +331,6 @@ pub enum SafeModuleSubcommands {
         /// as the source of funds or it can mint necessary tokens
         #[command(flatten)]
         private_key: PrivateKeyArgs,
-
-        /// Accepted for backwards compatibility. Currently unused — network-registry
-        /// registration is no longer performed by this command.
-        #[command(flatten, name = "manager_private_key")]
-        manager_private_key: ManagerPrivateKeyArgs,
     },
 
     /// Debug safe and module setup
@@ -598,9 +586,9 @@ impl SafeModuleSubcommands {
         );
 
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         // Use the requested Safe owners, or let the transaction signer own the Safe by default.
@@ -609,7 +597,7 @@ impl SafeModuleSubcommands {
                 .split(',')
                 .map(|addr| Address::from_str(addr).unwrap())
                 .collect(),
-            None => vec![a2h(signer_private_key.clone().public().to_address())],
+            None => vec![signer.address()],
         };
 
         // Deploy and configure the Safe and module in one transaction. The helper applies any
@@ -708,9 +696,9 @@ impl SafeModuleSubcommands {
             .collect();
 
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         // 1. Deregister the old node-safe from node-safe registry
@@ -728,7 +716,6 @@ impl SafeModuleSubcommands {
                 hopr_node_safe_registry.clone(),
                 node_eth_addresses.clone(),
                 old_module_addr,
-                signer_private_key.clone(),
             )
             .await
             {
@@ -741,14 +728,7 @@ impl SafeModuleSubcommands {
             };
 
             // then include nodes to module
-            match include_nodes_to_module(
-                safe.clone(),
-                node_eth_addresses.clone(),
-                module_addr,
-                signer_private_key,
-            )
-            .await
-            {
+            match include_nodes_to_module(safe.clone(), node_eth_addresses.clone(), module_addr).await {
                 Ok(_) => {
                     info!("Nodes are included to the new module");
                 }
@@ -811,9 +791,9 @@ impl SafeModuleSubcommands {
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
 
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
@@ -829,7 +809,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.token,
             contract_addresses.addresses.announcements,
             token_allowance,
-            signer_private_key,
         )
         .await?;
         info!("a new network has been included due to the migration");
@@ -965,9 +944,9 @@ impl SafeModuleSubcommands {
             HelperErrors::InvalidAddress(format!("Cannot parse old module address {old_module_address:?}"))
         })?;
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
@@ -980,7 +959,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
-            signer_private_key,
         )
         .await?;
         Ok(())
@@ -1025,9 +1003,9 @@ impl SafeModuleSubcommands {
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe_address:?}")))?;
 
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
@@ -1039,7 +1017,6 @@ impl SafeModuleSubcommands {
             contract_addresses.addresses.node_safe_migration,
             deployment_nonce,
             node_eth_addresses.clone(),
-            signer_private_key,
         )
         .await?;
         Ok(())
@@ -1060,21 +1037,15 @@ impl SafeModuleSubcommands {
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
 
         // read private key
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
 
         // use the safe to add a new network/channel target to the existing module without creating or removing modules
-        add_new_network_target_to_module(
-            safe.clone(),
-            module_addr,
-            contract_addresses.addresses.channels,
-            signer_private_key,
-        )
-        .await?;
+        add_new_network_target_to_module(safe.clone(), module_addr, contract_addresses.addresses.channels).await?;
         Ok(())
     }
 
@@ -1090,8 +1061,8 @@ impl SafeModuleSubcommands {
         let module_addr = Address::from_str(&module_address)
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
 
-        let signer_private_key = private_key.read_default()?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
         let service_registry = contract_addresses.addresses.service_registry;
         if service_registry.is_zero() {
@@ -1105,7 +1076,6 @@ impl SafeModuleSubcommands {
             SafeSingleton::new(safe_addr, rpc_provider),
             module_addr,
             service_registry,
-            signer_private_key,
         )
         .await
     }
@@ -1340,12 +1310,12 @@ impl SafeModuleSubcommands {
         let module_addr = Address::from_str(&module_address)
             .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse module address {module_address:?}")))?;
 
-        let signer_private_key = private_key.read_default()?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         let safe = SafeSingleton::new(safe_addr, rpc_provider.clone());
 
-        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr, signer_private_key).await?;
+        include_nodes_to_module(safe, node_eth_addresses.clone(), module_addr).await?;
         info!(
             "Nodes {:?} have been included in module {:?} owned by safe {:?}",
             node_eth_addresses, module_addr, safe_addr
@@ -1548,7 +1518,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hopr_bindings::config::{ContractInstances, NetworksWithContractAddresses, SingleNetworkContractAddresses};
-    use hopr_types::crypto::keypairs::ChainKeypair;
+    use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 
     use super::*;
     use crate::{key_pair::PasswordArgs, methods::create_rpc_client_to_anvil, utils::create_anvil};
@@ -1705,6 +1675,7 @@ mod tests {
         ])?;
         let private_key = PrivateKeyArgs {
             private_key: Some(hex::encode(contract_deployer.secret().as_ref())),
+            ..Default::default()
         };
         let node_csv = node_addresses
             .iter()
