@@ -34,7 +34,7 @@ use tracing::info;
 
 use crate::{
     environment_config::NetworkProviderArgs,
-    key_pair::{ArgEnvReader, IdentityFileArgs, PrivateKeyArgs},
+    key_pair::{IdentityFileArgs, PrivateKeyArgs, SignerArgs},
     methods::{get_native_and_token_balances, transfer_native_tokens, transfer_or_mint_tokens},
     utils::{Cmd, HelperErrors, a2h},
 };
@@ -114,10 +114,10 @@ impl FaucetArgs {
         info!("All the addresses: {:?}", eth_addresses_all);
 
         // `PRIVATE_KEY` - Private key is required to send on-chain transactions
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
 
         // get RPC provider for the given network and environment
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
         let contract_addresses = network_provider.get_network_details_from_name()?;
 
         let hopr_token = HoprToken::new(contract_addresses.addresses.token, rpc_provider.clone());
