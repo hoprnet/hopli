@@ -9,7 +9,7 @@
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # HOPR Nix Library (provides flake-utils and reusable build functions)
-    nix-lib.url = "github:hoprnet/nix-lib/v1.2.0";
+    nix-lib.url = "github:hoprnet/nix-lib/v2.0.0";
 
     # Rust build system
     rust-overlay.url = "github:oxalica/rust-overlay/master";
@@ -117,8 +117,6 @@
 
           dockerEnv = [
             "ETHERSCAN_API_KEY=placeholder"
-            "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-            "SSL_CERT_DIR=${pkgs.cacert}/etc/ssl/certs"
           ];
 
           profileDeps = with pkgs; [
