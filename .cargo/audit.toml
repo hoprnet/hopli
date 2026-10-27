@@ -6,8 +6,8 @@ ignore = [
   "RUSTSEC-2026-0204", # crossbeam-epoch; transitive via rayon
 
   "RUSTSEC-2026-0385", # ctutils; transitive through hopr-types cryptography
-  "RUSTSEC-2026-0387", # crypto-bigint 0.5.x; transitive through hopr-types cryptography
   "RUSTSEC-2026-0386", # tokio; transitive async runtime dependency
+  "RUSTSEC-2026-0387", # crypto-bigint 0.5.x; transitive through hopr-types cryptography
 
   # rustls stack; transitive TLS dependency.
   "RUSTSEC-2026-0346", # rustls
