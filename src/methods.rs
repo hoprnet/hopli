@@ -14,9 +14,9 @@ use SafeSingleton::{SafeSingletonInstance, execTransactionCall, removeOwnerCall,
 use hex_literal::hex;
 use hopr_bindings::{
     constants::{
-        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, DOMAIN_SEPARATOR_TYPEHASH,
-        ERC_1967_PROXY_CREATION_CODE, SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS,
-        SAFE_SAFE_L2_ADDRESS, SAFE_SAFEPROXYFACTORY_ADDRESS, SAFE_TX_TYPEHASH, SENTINEL_OWNERS,
+        DEFAULT_ANNOUNCEMENT_PERMISSIONS, DEFAULT_NODE_PERMISSIONS, ERC_1967_PROXY_CREATION_CODE,
+        SAFE_COMPATIBILITYFALLBACKHANDLER_ADDRESS, SAFE_MULTISEND_ADDRESS, SAFE_SAFE_L2_ADDRESS,
+        SAFE_SAFEPROXYFACTORY_ADDRESS, SENTINEL_OWNERS,
     },
     exports::alloy::{
         network::{EthereumWallet, TransactionBuilder},
@@ -31,7 +31,6 @@ use hopr_bindings::{
             fillers::*,
         },
         rpc::types::TransactionRequest,
-        signers::{Signer, local::PrivateKeySigner},
         sol,
         sol_types::{SolCall, SolValue},
     },
@@ -46,7 +45,6 @@ use hopr_bindings::{
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
     hopr_token::HoprToken::{HoprTokenInstance, approveCall},
 };
-use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
@@ -161,79 +159,33 @@ impl MultisendTransaction {
     }
 }
 
-/// get the domain separator of a safe instance
-/// contract_address should be safe address
-fn get_domain_separator(chain_id: U256, contract_address: Address) -> [u8; 32] {
-    keccak256(
-        (
-            B256::from_str(DOMAIN_SEPARATOR_TYPEHASH)
-                .unwrap_or_else(|_| panic!("decode the DOMAIN_SEPARATOR_TYPEHASH")), // DOMAIN_SEPARATOR_TYPEHASH
-            chain_id,         // getChainId
-            contract_address, // this
-        )
-            .abi_encode(),
-    )
-    .into()
-}
-
-/// Implement getTransactionHash() function as in vendor/solidity/safe-contracts-1.4.1/contracts/Safe.sol
-/// Note that `safeTxGas`, `baseGas`, and `gasPrice` are zero; `gasToken` is also address zero
-fn get_safe_transaction_hash(
-    to: Address,
-    value: U256,
-    data: Vec<u8>,
-    operation: SafeTxOperation,
-    refund_address: Address,
-    nonce: U256,
-    domain_separator: [u8; 32],
-) -> [u8; 32] {
-    // first encodeTransactionData()
-    let data_hash = keccak256(data);
-
-    let encoded = (
-        B256::from_str(SAFE_TX_TYPEHASH).unwrap_or_else(|_| panic!("failed to decode the SAFE_TX_TYPEHASH")), // SAFE_TX_TYPEHASH
-        to,                                                                                                   // to
-        value,                                                                                                // value
-        data_hash,                   // keccak256
-        U256::from(operation as u8), // operation
-        U256::ZERO,                  // safeTxGas
-        U256::ZERO,                  // baseGas
-        U256::ZERO,                  // gasPrice
-        Address::ZERO,               // gasToken
-        refund_address,              // refundReceiver
-        nonce,                       // _nonce
-    )
-        .abi_encode();
-    debug!("encoded {:?}", hex::encode(&encoded));
-    debug!("nonce {:?}", &nonce);
-
-    let safe_hash = keccak256(encoded);
-    debug!("safe_hash {:?}", hex::encode(safe_hash));
-
-    let encoded_transaction_data = (hex!("1901"), domain_separator, safe_hash).abi_encode_packed();
-    debug!("encoded_transaction_data {:?}", hex::encode(&encoded_transaction_data));
-
-    let transaction_hash = keccak256(encoded_transaction_data);
-    debug!("transaction_hash {:?}", hex::encode(transaction_hash));
-    transaction_hash.0
+/// Signature of a Safe transaction by an owner that executes it itself.
+///
+/// The Safe accepts it as a "pre-validated" signature (`v = 1`), whose `r` is the owner address: the owner
+/// approves the transaction by being `msg.sender` of `execTransaction`, so no message is signed. This lets
+/// any signer that can sign Ethereum transactions, including hardware wallets that cannot sign raw hashes,
+/// execute transactions of a Safe with a threshold of one.
+pub fn pre_validated_safe_signature(owner: Address) -> Bytes {
+    let mut signature = [0u8; 65];
+    // r: the owner address, left-padded to 32 bytes
+    signature[12..32].copy_from_slice(owner.as_slice());
+    // s: zero, v: 1
+    signature[64] = 1;
+    Bytes::copy_from_slice(&signature)
 }
 
 /// Use safe to delegatecall to multisend contract
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
-/// Note that the refund address is the caller (safe owner) wallet
+/// The transaction is executed by the default signer of the provider, which must be an owner of the safe
+/// (see [`pre_validated_safe_signature`]). The refund address is the same signer.
 async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
-    signer_key: ChainKeypair,
     multisend_contract: Address,
     multisend_txns: Vec<MultisendTransaction>,
-    chain_id: U256,
-    nonce: U256,
 ) -> Result<(), HelperErrors> {
-    // get signer
+    // the owner that executes the transaction
     let signer = safe.provider().default_signer_address();
-    // let signer = safe.client().default_sender().expect("client must have a sender");
-    let wallet = PrivateKeySigner::from_slice(signer_key.secret().as_ref()).expect("failed to construct wallet");
 
     // prepare a safe transaction:
     // 1. calculate total value
@@ -244,28 +196,7 @@ async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvid
         transactions: tx_payload.into(),
     }
     .abi_encode();
-    // 3. get domain separator
-    let domain_separator = get_domain_separator(chain_id, *safe.address());
-
     debug!("multisend_payload {:?}", hex::encode(&multisend_payload));
-
-    // get transaction hash
-    let transaction_hash = get_safe_transaction_hash(
-        multisend_contract,
-        total_value,
-        multisend_payload.clone(),
-        SafeTxOperation::DelegateCall,
-        signer,
-        nonce,
-        domain_separator,
-    );
-
-    // sign the transaction
-    let signature = wallet
-        .sign_hash(&B256::from_slice(&transaction_hash))
-        .await
-        .unwrap_or_else(|_| panic!("failed to sign a transaction hash"));
-    debug!("signature {:?}", hex::encode(signature.as_bytes()));
 
     // execute the transaction
     let tx_receipt = safe
@@ -279,11 +210,10 @@ async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvid
             U256::ZERO,
             Address::ZERO,
             signer,
-            Bytes::from(signature.as_bytes()),
+            pre_validated_safe_signature(signer),
         )
         .send()
         .await?
-        // .unwrap_or_else(|_| panic!("failed to exeute a pending transaction"))
         .get_receipt()
         .await?;
 
@@ -296,47 +226,25 @@ async fn send_multisend_safe_transaction_with_threshold_one_impl<P: WalletProvid
 /// Use safe to delegatecall to multisend contract
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
-/// Note that the refund address is the caller (safe owner) wallet
+/// The default signer of the provider executes the transaction and must be an owner of the safe.
 pub async fn send_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
-    signer_key: ChainKeypair,
     multisend_contract: Address,
     multisend_txns: Vec<MultisendTransaction>,
-    chain_id: U256,
-    nonce: U256,
 ) -> Result<(), HelperErrors> {
-    send_multisend_safe_transaction_with_threshold_one_impl(
-        safe,
-        signer_key,
-        multisend_contract,
-        multisend_txns,
-        chain_id,
-        nonce,
-    )
-    .await
+    send_multisend_safe_transaction_with_threshold_one_impl(safe, multisend_contract, multisend_txns).await
 }
 
 /// Use safe to delegatecall to multisend contract
 /// Note that when no additional signature is provided, the safe must have a threshold of one,
 /// so that the transaction can be executed.
-/// Note that the refund address is the caller (safe owner) wallet
+/// The default signer of the provider executes the transaction and must be an owner of the safe.
 pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
-    signer_key: ChainKeypair,
     multisend_contract: Address,
     multisend_txns: Vec<MultisendTransaction>,
-    chain_id: U256,
-    nonce: U256,
 ) -> Result<(), HelperErrors> {
-    send_multisend_safe_transaction_with_threshold_one_impl(
-        safe,
-        signer_key,
-        multisend_contract,
-        multisend_txns,
-        chain_id,
-        nonce,
-    )
-    .await
+    send_multisend_safe_transaction_with_threshold_one_impl(safe, multisend_contract, multisend_txns).await
 }
 
 /// Get chain id and safe nonce
@@ -936,7 +844,6 @@ pub async fn deregister_nodes_from_node_safe_registry_and_remove_from_module<P: 
     node_safe_registry: HoprNodeSafeRegistryInstance<Arc<P>>,
     node_addresses: Vec<Address>,
     module_addresses: Vec<Address>,
-    owner_chain_key: ChainKeypair,
 ) -> Result<u32, HelperErrors> {
     let provider = node_safe_registry.provider();
     // check registered safes of given node addresses
@@ -953,8 +860,6 @@ pub async fn deregister_nodes_from_node_safe_registry_and_remove_from_module<P: 
             let safe = SafeSingleton::new(registered_safe.to_owned(), provider.clone());
             // update counter
             nodes_to_remove_counter += 1;
-            // get chain id and nonce
-            let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
 
             // for each safe, prepare a multisend transaction to dergister node from safe and remove node from module
             let multisend_txns: Vec<MultisendTransaction> = vec![
@@ -983,15 +888,7 @@ pub async fn deregister_nodes_from_node_safe_registry_and_remove_from_module<P: 
             ];
 
             // send safe transaction
-            send_multisend_safe_transaction_with_threshold_one(
-                safe,
-                owner_chain_key.clone(),
-                SAFE_MULTISEND_ADDRESS,
-                multisend_txns,
-                chain_id,
-                safe_nonce,
-            )
-            .await?;
+            send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
         }
     }
 
@@ -1003,11 +900,7 @@ pub async fn include_nodes_to_module<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     node_addresses: Vec<Address>,
     module_address: Address,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
-    // get chain id and nonce
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
-
     // prepare a multisend transaction to include each node to the  module
     let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
     for node_address in node_addresses {
@@ -1025,15 +918,7 @@ pub async fn include_nodes_to_module<P: WalletProvider + Provider>(
     }
 
     // send safe transaction
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key.clone(),
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await?;
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
 
     Ok(())
 }
@@ -1049,10 +934,7 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
     token_address: Address,
     announcement_address: Address,
     allowance: U256,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
-
     let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
 
     // scope channels and tokens contract of the network
@@ -1101,15 +983,7 @@ pub async fn migrate_nodes<P: WalletProvider + Provider>(
     });
 
     // send safe transaction
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key.clone(),
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await?;
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
 
     Ok(())
 }
@@ -1123,10 +997,7 @@ pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProv
     safe_migration_contract_address: Address,
     deployment_nonce: U256,
     node_addresses: Vec<Address>,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
-
     // scope channels and tokens contract of the network
     let default_target = build_default_target(channels_address)?;
 
@@ -1146,15 +1017,7 @@ pub async fn create_new_module_include_nodes_and_remove_old_module<P: WalletProv
     }];
 
     // send safe transaction
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key.clone(),
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await?;
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
 
     Ok(())
 }
@@ -1167,10 +1030,8 @@ pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
     safe_migration_contract_address: Address,
     deployment_nonce: U256,
     node_addresses: Vec<Address>,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
     // get chain id and safe nonce for further safe txns
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
 
     // scope channels and tokens contract of the network
     let default_target = build_default_target(channels_address)?;
@@ -1190,15 +1051,7 @@ pub async fn create_new_module_and_include_nodes<P: WalletProvider + Provider>(
     }];
 
     // send safe transaction
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key.clone(),
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await?;
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
 
     Ok(())
 }
@@ -1210,10 +1063,7 @@ pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
     safe: SafeSingletonInstance<Arc<P>>,
     module_address: Address,
     channels_address: Address,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
-
     let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
 
     // scope channels contract of the network
@@ -1233,15 +1083,7 @@ pub async fn add_new_network_target_to_module<P: WalletProvider + Provider>(
     });
 
     // send safe transaction
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key.clone(),
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await?;
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await?;
 
     Ok(())
 }
@@ -1256,7 +1098,6 @@ pub async fn add_service_registry_target_to_module<P: WalletProvider + Provider>
     safe: SafeSingletonInstance<Arc<P>>,
     module_address: Address,
     service_registry_address: Address,
-    owner_chain_key: ChainKeypair,
 ) -> Result<(), HelperErrors> {
     if service_registry_address.is_zero() {
         return Err(HelperErrors::ContractNotDeployed(
@@ -1279,7 +1120,6 @@ pub async fn add_service_registry_target_to_module<P: WalletProvider + Provider>
         return Ok(());
     }
 
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
     let multisend_txns = vec![MultisendTransaction {
         encoded_data: scopeTargetServiceRegistryCall {
             serviceRegistry: service_registry_address,
@@ -1291,15 +1131,7 @@ pub async fn add_service_registry_target_to_module<P: WalletProvider + Provider>
         value: U256::ZERO,
     }];
 
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        owner_chain_key,
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await
 }
 
 /// Quick check if the following values are correct, for one single node:
@@ -1864,6 +1696,20 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_pre_validated_safe_signature() {
+        let owner = address!("47f2710069f01672d01095ca252018ebf08bf85e");
+        let signature = pre_validated_safe_signature(owner);
+        assert_eq!(signature.len(), 65);
+        // r: owner address left-padded to 32 bytes
+        assert!(signature[..12].iter().all(|b| *b == 0));
+        assert_eq!(&signature[12..32], owner.as_slice());
+        // s: zero
+        assert!(signature[32..64].iter().all(|b| *b == 0));
+        // v: 1, pre-validated by msg.sender
+        assert_eq!(signature[64], 1);
+    }
+
     #[tokio::test]
     async fn test_deploy_proxy() -> anyhow::Result<()> {
         let prediction = deploy_proxy(
@@ -2322,15 +2168,8 @@ mod tests {
         debug!("safe_nonce {:?}", safe_nonce);
 
         // send safe transaction
-        send_multisend_safe_transaction_with_threshold_one(
-            safe.clone(),
-            contract_deployer,
-            SAFE_MULTISEND_ADDRESS,
-            multisend_txns,
-            U256::from(chain_id),
-            safe_nonce,
-        )
-        .await?;
+        send_multisend_safe_transaction_with_threshold_one(safe.clone(), SAFE_MULTISEND_ADDRESS, multisend_txns)
+            .await?;
 
         // check allowance for channel contract is 4
         let new_allowance = instances
@@ -2400,7 +2239,6 @@ mod tests {
             instances.safe_registry.clone(),
             deployer_vec.clone(),
             vec![*node_module.address()],
-            contract_deployer.clone(),
         )
         .await?;
 
@@ -2469,7 +2307,7 @@ mod tests {
         }
 
         // include nodes to safe
-        include_nodes_to_module(safe, node_addresses.clone(), *node_module.address(), contract_deployer).await?;
+        include_nodes_to_module(safe, node_addresses.clone(), *node_module.address()).await?;
 
         // check nodes are included
         // check nodes are not included
@@ -2544,7 +2382,6 @@ mod tests {
             *new_token.address(),
             *new_announcements.address(),
             U256::MAX,
-            contract_deployer,
         )
         .await?;
 
@@ -2686,19 +2523,12 @@ mod tests {
             !node_module.tryGetTarget(additional_registry).call().await?._0,
             "the compatibility target should start unscoped"
         );
-        add_service_registry_target_to_module(
-            safe.clone(),
-            *node_module.address(),
-            additional_registry,
-            contract_deployer.clone(),
-        )
-        .await?;
+        add_service_registry_target_to_module(safe.clone(), *node_module.address(), additional_registry).await?;
         assert!(
             node_module.tryGetTarget(additional_registry).call().await?._0,
             "the compatibility operation should scope the target"
         );
-        add_service_registry_target_to_module(safe, *node_module.address(), additional_registry, contract_deployer)
-            .await?;
+        add_service_registry_target_to_module(safe, *node_module.address(), additional_registry).await?;
 
         Ok(())
     }

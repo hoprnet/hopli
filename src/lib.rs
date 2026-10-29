@@ -6,6 +6,7 @@
 //! - `faucet`: distribute native/HOPR tokens to nodes
 //! - `safe_module`: create and operate Safe + module setups
 //! - `service`: read and write the on-chain registry of node services
+//! - `signer`: sign transactions with a private key or a hardware wallet (Ledger, Trezor)
 //! - `win_prob`: manage winning probability parameters
 
 pub mod environment_config;
@@ -16,6 +17,7 @@ pub mod methods;
 pub mod payloads;
 pub mod safe_module;
 pub mod service;
+pub mod signer;
 #[allow(clippy::too_many_arguments)]
 pub mod utils;
 pub mod win_prob;
