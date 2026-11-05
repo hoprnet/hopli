@@ -133,8 +133,8 @@ jobs:
       id-token: write # Codecov OIDC upload in the coverage job
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      enable_unit_tests: true
-      unit_test_command: "nix develop -c cargo test --lib"
+      # Coverage runs the same `--lib` tests, so the plain unit job is redundant.
+      enable_unit_tests: false
       enable_nightly_tests: ${{ needs.changes.outputs.rust == 'true' }}
       nightly_test_command: "nix develop .#nightly -c cargo test -Z panic-abort-tests --lib"
       enable_unit_coverage: ${{ needs.changes.outputs.rust == 'true' }}
