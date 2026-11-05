@@ -208,7 +208,7 @@ jobs:
       binary: hopli
       runner: ${{ matrix.runner }}
       timeout_minutes: 120
-      enabled: ${{ needs.changes.outputs.rust == 'true' && (matrix.required_label == '' || contains(github.event.pull_request.labels.*.name, matrix.required_label)) }}
+      enabled: ${{ needs.changes.outputs.rust == 'true' && (matrix.required_label == '' || github.event_name == 'merge_group' || contains(github.event.pull_request.labels.*.name, matrix.required_label)) }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
