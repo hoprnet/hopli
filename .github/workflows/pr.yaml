@@ -121,9 +121,12 @@ jobs:
       audit: ${{ needs.changes.outputs.lockfile == 'true' }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # Stages: changes/checks, then tests, then builds. A failed stage skips the
+  # later ones; the merge gate then fails on the failed job. Stage 3 uses
+  # `!failure()` so a path-filter skip of tests does not skip the builds.
   tests:
     name: Test
-    needs: changes
+    needs: [changes, checks]
     uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
     permissions:
       contents: read
@@ -142,10 +145,10 @@ jobs:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
   build-candidate-binaries:
     name: Build Candidate Binaries
-    needs: changes
+    needs: [changes, checks, tests]
     runs-on: depot-ubuntu-24.04-4
     timeout-minutes: 20
-    if: github.event.pull_request.draft == false && needs.changes.outputs.rust == 'true'
+    if: ${{ !cancelled() && !failure() && github.event.pull_request.draft == false && needs.changes.outputs.rust == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -175,7 +178,8 @@ jobs:
         run: nix build .#"${BINARY}"-candidate
   build-binaries:
     name: Binary ${{ matrix.architecture }}
-    needs: changes
+    needs: [changes, checks, tests]
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       matrix:
@@ -210,8 +214,8 @@ jobs:
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
   build-docker:
     name: Docker
-    needs: [changes, build-binaries]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, checks, tests, build-binaries]
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
