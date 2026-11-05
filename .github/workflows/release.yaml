@@ -16,8 +16,7 @@ on:
 concurrency:
   group: release
   cancel-in-progress: false
-permissions:
-  contents: write
+permissions: {}
 jobs:
   build-binaries:
     name: Binary ${{ matrix.architecture }}

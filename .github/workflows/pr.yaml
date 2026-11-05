@@ -11,9 +11,8 @@ on:
       - ready_for_review
 permissions:
   contents: read
-  id-token: write # zizmor: ignore[excessive-permissions]
 concurrency:
-  group: ${{ github.event.pull_request.head.ref || github.ref_name }}-pr
+  group: ${{ github.event.pull_request.number || github.ref }}-pr
   cancel-in-progress: true
 jobs:
   validate-pr-title:
@@ -37,6 +36,8 @@ jobs:
             refactor
             perf
             test
+            ci
+            revert
           requireScope: false
           ignoreLabels: |
             bot
@@ -85,6 +86,9 @@ jobs:
   tests:
     name: Test
     uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
+    permissions:
+      contents: read
+      id-token: write # Codecov OIDC upload in the coverage job
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       enable_unit_tests: true
@@ -187,3 +191,28 @@ jobs:
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # Single aggregate merge gate: green only when every other job in this run
+  # succeeded. Mark THIS job as the required check in the branch ruleset, so
+  # adding, renaming, or removing a job never needs a ruleset change.
+  merge-gate:
+    name: Merge gate
+    if: always()
+    needs:
+      - validate-pr-title
+      - label
+      - checks
+      - tests
+      - build-candidate-binaries
+      - build-binaries
+      - build-docker
+    runs-on: depot-ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require all jobs to pass
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
+          # validate-pr-title and label run on pull_request only.
+          # build-candidate-binaries is skipped for draft PRs only; a ready PR
+          # or merge-queue run must build it.
+          allowed-skips: ${{ github.event.pull_request.draft == false && 'validate-pr-title, label' || 'validate-pr-title, label, build-candidate-binaries' }}
