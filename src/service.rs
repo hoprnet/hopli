@@ -58,7 +58,6 @@ use hopr_bindings::{
     hopr_service_registry::HoprServiceRegistry::{self, Entry},
 };
 use hopr_types::{
-    crypto::keypairs::ChainKeypair,
     internal::prelude::{ServiceMetadata, ServiceType},
     primitive::prelude::ToHex,
 };
@@ -66,10 +65,9 @@ use tracing::info;
 
 use crate::{
     environment_config::{NetworkProviderArgs, RpcProvider},
-    key_pair::{ArgEnvReader, PrivateKeyArgs},
+    key_pair::{PrivateKeyArgs, SignerArgs},
     methods::{
-        MultisendTransaction, SafeSingleton, SafeTxOperation, get_chain_id_and_safe_nonce,
-        send_multisend_safe_transaction_with_threshold_one,
+        MultisendTransaction, SafeSingleton, SafeTxOperation, send_multisend_safe_transaction_with_threshold_one,
     },
     payloads::{
         approve_hopr_token_payload, recover_service_registry_tokens_payload, register_service_type_payload,
@@ -626,22 +624,12 @@ fn multisend_leg(tx: TransactionRequest) -> Result<MultisendTransaction, HelperE
 async fn send_from_safe(
     rpc_provider: Arc<RpcProvider>,
     safe_address: Address,
-    signer_key: ChainKeypair,
     legs: Vec<TransactionRequest>,
 ) -> Result<(), HelperErrors> {
     let safe = SafeSingleton::new(safe_address, rpc_provider);
-    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
     let multisend_txns = legs.into_iter().map(multisend_leg).collect::<Result<Vec<_>, _>>()?;
 
-    send_multisend_safe_transaction_with_threshold_one(
-        safe,
-        signer_key,
-        SAFE_MULTISEND_ADDRESS,
-        multisend_txns,
-        chain_id,
-        safe_nonce,
-    )
-    .await
+    send_multisend_safe_transaction_with_threshold_one(safe, SAFE_MULTISEND_ADDRESS, multisend_txns).await
 }
 
 /// Sends `tx` from the caller's own key and waits for it to be mined.
@@ -664,9 +652,9 @@ impl ServiceSubcommands {
         metadata: ServiceMetadata,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         let safe = match safe_address {
             Some(safe) => safe,
@@ -701,7 +689,7 @@ impl ServiceSubcommands {
             &metadata,
         ));
 
-        send_from_safe(rpc_provider, safe, signer_private_key, legs).await
+        send_from_safe(rpc_provider, safe, legs).await
     }
 
     /// Replaces the metadata of the entry of `node` under `service_type`.
@@ -715,9 +703,9 @@ impl ServiceSubcommands {
         metadata: ServiceMetadata,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         let safe = match safe_address {
             Some(safe) => safe,
@@ -752,7 +740,7 @@ impl ServiceSubcommands {
             &metadata,
         ));
 
-        send_from_safe(rpc_provider, safe, signer_private_key, legs).await
+        send_from_safe(rpc_provider, safe, legs).await
     }
 
     /// Removes the entry of `node` under `service_type`.
@@ -766,9 +754,9 @@ impl ServiceSubcommands {
         safe_address: Option<Address>,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         let safe = match safe_address {
             Some(safe) => safe,
@@ -781,7 +769,7 @@ impl ServiceSubcommands {
         );
 
         let leg = self_deregister_service_payload(addresses.service_registry, &service_type, node_address);
-        send_from_safe(rpc_provider, safe, signer_private_key, vec![leg]).await
+        send_from_safe(rpc_provider, safe, vec![leg]).await
     }
 
     /// Reads the entry of `node` under `service_type`, if it has one.
@@ -932,9 +920,9 @@ impl ServiceSubcommands {
         update_burn: U256,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         let registry = HoprServiceRegistry::new(addresses.service_registry, rpc_provider.clone());
         let fee = registry
@@ -976,9 +964,9 @@ impl ServiceSubcommands {
         requirement: Address,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(%service_type, %requirement, "Setting the requirement of a service type");
         send_from_caller(
@@ -995,9 +983,9 @@ impl ServiceSubcommands {
         amount: U256,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(%service_type, %amount, "Setting the registration burn of a service type");
         send_from_caller(
@@ -1014,9 +1002,9 @@ impl ServiceSubcommands {
         amount: U256,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(%service_type, %amount, "Setting the update burn of a service type");
         send_from_caller(
@@ -1058,9 +1046,9 @@ impl ServiceSubcommands {
             }
         };
 
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         if abandon {
             info!(%service_type, "Abandoning a service type; this cannot be undone");
@@ -1081,9 +1069,9 @@ impl ServiceSubcommands {
         amount: U256,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(%amount, "Setting the service type registration fee");
         send_from_caller(
@@ -1101,9 +1089,9 @@ impl ServiceSubcommands {
         expected_safe: Address,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(
             %node_safe_registry, %probe_node, %expected_safe,
@@ -1128,9 +1116,9 @@ impl ServiceSubcommands {
         recipient: Address,
         private_key: PrivateKeyArgs,
     ) -> Result<(), HelperErrors> {
-        let signer_private_key = private_key.read_default()?;
+        let signer = private_key.read_signer(network_provider.chain_id()).await?;
         let addresses = addresses_with_service_registry(&network_provider)?;
-        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let rpc_provider = network_provider.get_provider_with_wallet(&signer).await?;
 
         info!(%token, %recipient, "Recovering tokens from the service registry");
         send_from_caller(
@@ -1329,7 +1317,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hopr_bindings::config::{ContractInstances, NetworksWithContractAddresses, SingleNetworkContractAddresses};
-    use hopr_types::{crypto::keypairs::Keypair, primitive::prelude::BytesRepresentable};
+    use hopr_types::{
+        crypto::keypairs::{ChainKeypair, Keypair},
+        primitive::prelude::BytesRepresentable,
+    };
 
     use super::*;
     use crate::{
@@ -1817,6 +1808,7 @@ mod tests {
         };
         let private_key = PrivateKeyArgs {
             private_key: Some(hex::encode(contract_deployer.secret().as_ref())),
+            ..Default::default()
         };
 
         // claim an open service type with non-zero burns, paying the global registration fee
