@@ -261,9 +261,9 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           # validate-pr-title and label run on pull_request only.
-          # build-candidate-binaries is skipped for draft PRs only; a ready PR
-          # or merge-queue run must build it. tests, build-candidate-binaries,
-          # build-binaries and build-docker are gated on changes.outputs.rust:
-          # they skip only for a non-Rust change, and a Rust change must run
-          # them. A failed job reds the gate either way.
+          # build-candidate-binaries is skipped for draft PRs and for
+          # non-Rust changes; a ready PR or merge-queue run with Rust changes
+          # must build it. tests, build-binaries and build-docker are gated on
+          # changes.outputs.rust: they skip only for a non-Rust change, and a
+          # Rust change must run them. A failed job reds the gate either way.
           allowed-skips: ${{ format('validate-pr-title, label{0}{1}', github.event.pull_request.draft == true && ', build-candidate-binaries' || '', needs.changes.outputs.rust != 'true' && ', tests, build-candidate-binaries, build-binaries, build-docker' || '') }}
