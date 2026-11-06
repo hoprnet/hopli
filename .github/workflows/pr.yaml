@@ -11,9 +11,8 @@ on:
       - ready_for_review
 permissions:
   contents: read
-  id-token: write # zizmor: ignore[excessive-permissions]
 concurrency:
-  group: ${{ github.event.pull_request.head.ref || github.ref_name }}-pr
+  group: ${{ github.event.pull_request.number || github.ref }}-pr
   cancel-in-progress: true
 jobs:
   validate-pr-title:
@@ -37,6 +36,8 @@ jobs:
             refactor
             perf
             test
+            ci
+            revert
           requireScope: false
           ignoreLabels: |
             bot
@@ -44,6 +45,7 @@ jobs:
   label:
     name: Add labels
     if: github.event_name == 'pull_request'
+    continue-on-error: true
     runs-on: depot-ubuntu-24.04
     permissions:
       contents: read
@@ -72,26 +74,70 @@ jobs:
           if [[ "$HEAD_REPO" != "$BASE_REPO" ]]; then
             gh pr edit "$PR_NUMBER" --add-label "external"
           fi
+  # Merge-queue runs always run everything. Format and pre-commit always run.
+  changes:
+    name: Detect changes
+    runs-on: depot-ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
+      lockfile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.lockfile == 'true' }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            rust:
+              - "src/**"
+              - "tests/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "rust-toolchain.toml"
+              - "rustfmt.toml"
+              - ".cargo/**"
+              - ".ci/**"
+              - "flake.nix"
+              - "flake.lock"
+              - "nix/**"
+              - ".github/workflows/**"
+            lockfile:
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - ".cargo/audit.toml"
   checks:
     name: Check
+    needs: changes
     uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@d0cffaf9e9209c8eca00e8c74e82ac3f5f3cf7bb # workflow-checks-v2
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       runner_small: depot-ubuntu-24.04
       runner_large: depot-ubuntu-24.04-4
       deps_command: 'nix develop .#ci -c bash -c "cargo machete"'
+      lint: ${{ needs.changes.outputs.rust == 'true' }}
+      audit: ${{ needs.changes.outputs.lockfile == 'true' }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # Stages: changes/checks, then tests, then builds. A failed stage skips the
+  # later ones; the merge gate then fails on the failed job. Stage 3 uses
+  # `!failure()` so a path-filter skip of tests does not skip the builds.
   tests:
     name: Test
+    needs: [changes, checks]
     uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
+    permissions:
+      contents: read
+      id-token: write # Codecov OIDC upload in the coverage job
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
-      enable_unit_tests: true
-      unit_test_command: "nix develop -c cargo test --lib"
-      enable_nightly_tests: true
+      # Coverage runs the same `--lib` tests, so the plain unit job is redundant.
+      enable_unit_tests: false
+      enable_nightly_tests: ${{ needs.changes.outputs.rust == 'true' }}
       nightly_test_command: "nix develop .#nightly -c cargo test -Z panic-abort-tests --lib"
-      enable_unit_coverage: true
+      enable_unit_coverage: ${{ needs.changes.outputs.rust == 'true' }}
       unit_coverage_command: "nix develop .#coverage -c cargo llvm-cov --workspace --lib --lcov --output-path coverage.lcov"
       runner_unit: depot-ubuntu-24.04-4
       test_timeout: 60
@@ -99,9 +145,10 @@ jobs:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
   build-candidate-binaries:
     name: Build Candidate Binaries
+    needs: [changes, checks, tests]
     runs-on: depot-ubuntu-24.04-4
     timeout-minutes: 20
-    if: github.event.pull_request.draft == false
+    if: ${{ !cancelled() && !failure() && github.event.pull_request.draft == false && needs.changes.outputs.rust == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -131,6 +178,8 @@ jobs:
         run: nix build .#"${BINARY}"-candidate
   build-binaries:
     name: Binary ${{ matrix.architecture }}
+    needs: [changes, checks, tests]
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       matrix:
@@ -159,13 +208,14 @@ jobs:
       binary: hopli
       runner: ${{ matrix.runner }}
       timeout_minutes: 120
-      enabled: ${{ matrix.required_label == '' || contains(github.event.pull_request.labels.*.name, matrix.required_label) }}
+      enabled: ${{ needs.changes.outputs.rust == 'true' && (matrix.required_label == '' || github.event_name == 'merge_group' || contains(github.event.pull_request.labels.*.name, matrix.required_label)) }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       gpg_private_key: ${{ secrets.GPG_HOPRNET_PRIVATE_KEY }}
   build-docker:
     name: Docker
-    needs: build-binaries
+    needs: [changes, checks, tests, build-binaries]
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
     permissions:
       contents: read
@@ -174,6 +224,7 @@ jobs:
     with:
       source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
       version_type: commit
+      concurrency_group_suffix: ${{ github.event.pull_request.number || github.ref_name }}
       build_matrix: >-
         [
           {
@@ -187,3 +238,32 @@ jobs:
       fail_on_scan_vulnerabilities: ${{ vars.FAIL_ON_SCAN_VULNERABILITIES }}
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # Single aggregate merge gate: green only when every other job in this run
+  # succeeded. Mark THIS job as the required check in the branch ruleset, so
+  # adding, renaming, or removing a job never needs a ruleset change.
+  merge-gate:
+    name: Merge gate
+    if: always()
+    needs:
+      - validate-pr-title
+      - label
+      - changes
+      - checks
+      - tests
+      - build-candidate-binaries
+      - build-binaries
+      - build-docker
+    runs-on: depot-ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require all jobs to pass
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
+          # validate-pr-title and label run on pull_request only.
+          # build-candidate-binaries is skipped for draft PRs and for
+          # non-Rust changes; a ready PR or merge-queue run with Rust changes
+          # must build it. tests, build-binaries and build-docker are gated on
+          # changes.outputs.rust: they skip only for a non-Rust change, and a
+          # Rust change must run them. A failed job reds the gate either way.
+          allowed-skips: ${{ format('validate-pr-title, label{0}{1}', github.event.pull_request.draft == true && ', build-candidate-binaries' || '', needs.changes.outputs.rust != 'true' && ', tests, build-candidate-binaries, build-binaries, build-docker' || '') }}

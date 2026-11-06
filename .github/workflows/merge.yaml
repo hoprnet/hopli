@@ -10,8 +10,7 @@ on:
 concurrency:
   group: merge-${{ github.event.pull_request.base.ref }}
   cancel-in-progress: false
-permissions:
-  contents: read
+permissions: {}
 jobs:
   build-binaries:
     name: Binary ${{ matrix.architecture }}
