@@ -44,7 +44,8 @@ jobs:
             ignore-semantic-pull-request
   label:
     name: Add labels
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    # Fork PRs get a read-only token and cannot write labels; stay green so the gate passes.
     continue-on-error: true
     runs-on: depot-ubuntu-24.04
     permissions:
@@ -111,9 +112,9 @@ jobs:
   checks:
     name: Check
     needs: changes
-    uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@d0cffaf9e9209c8eca00e8c74e82ac3f5f3cf7bb # workflow-checks-v2
+    uses: hoprnet/hopr-workflows/.github/workflows/checks.yaml@43c833e72dffe4f2f3be60193733e5657f8aa0d7 # workflow-checks-v3.0.0
     with:
-      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+      repo_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       runner_small: depot-ubuntu-24.04
       runner_large: depot-ubuntu-24.04-4
       deps_command: 'nix develop .#ci -c bash -c "cargo machete"'
@@ -127,12 +128,12 @@ jobs:
   tests:
     name: Test
     needs: [changes, checks]
-    uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@798d791de5c5485c3043049781dfd0938539a36a # workflow-tests-v6
+    uses: hoprnet/hopr-workflows/.github/workflows/tests.yaml@43c833e72dffe4f2f3be60193733e5657f8aa0d7 # workflow-tests-v7.0.0
     permissions:
       contents: read
       id-token: write # Codecov OIDC upload in the coverage job
     with:
-      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+      repo_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       # Coverage runs the same `--lib` tests, so the plain unit job is redundant.
       enable_unit_tests: false
       enable_nightly_tests: ${{ needs.changes.outputs.rust == 'true' }}
@@ -196,12 +197,12 @@ jobs:
             runner: depot-macos-15
             build_command: nix build -L .#binary-hopli-aarch64-darwin
             required_label: binary:aarch64-darwin
-    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@b4ee9597f2c47f62fbc2c989a4af36fc4abf2f6f # build-binaries-v3
+    uses: hoprnet/hopr-workflows/.github/workflows/build-binaries.yaml@43c833e72dffe4f2f3be60193733e5657f8aa0d7 # build-binaries-v4.0.0
     permissions:
       contents: read
       id-token: write
     with:
-      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+      repo_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       version_type: commit
       architecture: ${{ matrix.architecture }}
       build_command: ${{ matrix.build_command }}
@@ -216,13 +217,13 @@ jobs:
     name: Docker
     needs: [changes, checks, tests, build-binaries]
     if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
-    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@fa71078959cf9f892185e8df16551720693a2cd1 # 0.9.3
+    uses: hoprnet/hopr-workflows/.github/workflows/build-docker.yaml@43c833e72dffe4f2f3be60193733e5657f8aa0d7 # build-docker-v4.0.0
     permissions:
       contents: read
       pull-requests: write
       id-token: write
     with:
-      source_branch: ${{ github.event.pull_request.head.ref || github.ref }}
+      repo_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       version_type: commit
       concurrency_group_suffix: ${{ github.event.pull_request.number || github.ref_name }}
       build_matrix: >-
