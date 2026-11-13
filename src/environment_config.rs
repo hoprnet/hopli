@@ -9,6 +9,7 @@ use hopr_bindings::{
     config::SingleNetworkContractAddresses,
     exports::alloy::{
         network::EthereumWallet,
+        primitives::Address,
         providers::{
             Identity, ProviderBuilder, RootProvider,
             fillers::{
@@ -32,6 +33,48 @@ type SharedFillerChain = JoinFill<
 >;
 pub type RpcProvider = FillProvider<JoinFill<SharedFillerChain, WalletFiller<EthereumWallet>>, RootProvider>;
 pub type RpcProviderWithoutSigner = FillProvider<SharedFillerChain, RootProvider>;
+
+/// Content of `ethereum/contracts/contracts-addresses.json` of the hoprnet/contracts repository at tag v3.0.1
+/// (<https://github.com/hoprnet/contracts/blob/v3.0.1/ethereum/contracts/contracts-addresses.json>), which holds
+/// the HOPR v3 networks. They are not part of the embedded network configuration of `hopr-bindings`, which only
+/// contains networks of the current contracts.
+pub const V3_CONTRACTS_ADDRESSES: &str = include_str!("../config/v3.0.1-contracts-addresses.json");
+
+/// Name of the HOPR v3 production network
+pub const DUFOUR_NETWORK_NAME: &str = "dufour";
+
+/// Contract addresses of a HOPR v3 network that are used to migrate nodes away from it
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct V3NetworkAddresses {
+    /// HoprChannels contract
+    pub channels: Address,
+    /// HoprNodeSafeRegistry contract
+    pub node_safe_registry: Address,
+    /// wxHOPR token contract
+    pub token: Address,
+}
+
+/// A network of [`V3_CONTRACTS_ADDRESSES`], of which only the used addresses are read
+#[derive(Debug, Deserialize)]
+struct V3Network {
+    addresses: V3NetworkAddresses,
+}
+
+/// Networks of [`V3_CONTRACTS_ADDRESSES`]
+#[derive(Debug, Deserialize)]
+struct V3NetworkConfig {
+    networks: BTreeMap<String, V3Network>,
+}
+
+/// Get the contract addresses of a HOPR v3 network, e.g. [`DUFOUR_NETWORK_NAME`], from [`V3_CONTRACTS_ADDRESSES`]
+pub fn get_v3_network_addresses(network: &str) -> Result<V3NetworkAddresses, HelperErrors> {
+    let config: V3NetworkConfig = serde_json::from_str(V3_CONTRACTS_ADDRESSES).map_err(HelperErrors::SerdeJson)?;
+    config
+        .networks
+        .get(network)
+        .map(|n| n.addresses)
+        .ok_or(HelperErrors::UnknownNetwork)
+}
 
 /// mapping of networks with its details
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -259,6 +302,40 @@ mod tests {
         let chain_id = provider.get_chain_id().await?;
         assert_eq!(chain_id, anvil.chain_id());
         Ok(())
+    }
+
+    #[test]
+    fn test_get_dufour_network_addresses() -> anyhow::Result<()> {
+        let dufour = get_v3_network_addresses(DUFOUR_NETWORK_NAME)?;
+        assert_eq!(
+            dufour,
+            V3NetworkAddresses {
+                channels: "0x693Bac5ce61c720dDC68533991Ceb41199D8F8ae".parse()?,
+                node_safe_registry: "0xe15C24a0910311c83aC78B5930d771089E93077b".parse()?,
+                token: "0xD4fdec44DB9D44B8f2b6d529620f9C0C7066A2c1".parse()?,
+            }
+        );
+
+        // dufour shares the token of the current networks, but none of their channels and registry contracts
+        let networks = NetworkProviderArgs::default().load_all_networks()?;
+        let jura_prod = networks
+            .get("jura-prod")
+            .expect("embedded config should contain jura-prod");
+        assert_eq!(dufour.token, jura_prod.addresses.token);
+        for network in networks.values() {
+            assert_ne!(dufour.channels, network.addresses.channels);
+            assert_ne!(dufour.node_safe_registry, network.addresses.node_safe_registry);
+        }
+        assert!(!networks.contains_key(DUFOUR_NETWORK_NAME));
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_unknown_v3_network_addresses_errors() {
+        assert!(matches!(
+            get_v3_network_addresses("jura-prod"),
+            Err(HelperErrors::UnknownNetwork)
+        ));
     }
 
     #[test]

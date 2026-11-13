@@ -257,6 +257,64 @@ hopli safe-module move \
   --private-key <PRIVATE_KEY>
 ```
 
+Decommission nodes by closing all their channels, on behalf of the Safe each node is registered with
+(the signer must be an owner of a Safe with threshold 1), then returning the xDAI of the nodes whose
+identity files are provided to their Safe:
+
+```bash
+hopli safe-module decommission-nodes \
+  --network jura-prod \
+  --provider-url https://gnosis-rpc.example/ \
+  --blokli-url https://blokli.jura.hoprnet.link \
+  --identity-directory ./identities \
+  --password-path ./secrets/identity.pwd \
+  --private-key <SAFE_OWNER_PRIVATE_KEY>
+```
+
+Nodes can be given by identity files (`--identity-directory` or `--identity-from-path` together
+with the identity password) and/or by address (`--node-address 0xNode1...,0xNode2...`). Once the
+channels are closed, each node whose identity file is provided transfers its remaining xDAI to its
+Safe, keeping only the fee of this last transfer. Nodes given only by address keep their xDAI.
+Channel states are read from Blokli (`--blokli-url` or `HOPLI_BLOKLI_URL`). The command closes the
+incoming channels, initiates the closure of the open outgoing channels, and finalizes the closure
+of each outgoing channel once its own notice period is due (`NOTICE_PERIOD_CHANNEL_CLOSURE` after
+its closure was initiated on-chain). Channel operations are bundled into Safe transactions of at
+most `--batch-size` channels (default 30).
+
+Migrate nodes from the dufour (v3) network to a current network (e.g. `jura-prod`) in one go:
+
+```bash
+hopli safe-module migrate-from-v3 \
+  --network jura-prod \
+  --provider-url https://gnosis-rpc.example/ \
+  --identity-directory ./identities \
+  --password-path ./secrets/identity.pwd \
+  --counterparty-address 0xPeer1...,0xPeer2... \
+  --admin-address 0xNewOwner... \
+  --old-safe-owner-private-key <OLD_SAFE_OWNER_PRIVATE_KEY> \
+  --private-key <PRIVATE_KEY>
+```
+
+The command:
+
+1. creates a new Safe and module on `--network`, owned by `--admin-address` (default: the signer of
+   `--private-key`) with `--threshold` (default 1), with the nodes included in the module and an
+   optional token `--allowance` for the channels contract. To reuse a Safe created by a previous
+   run, pass `--new-safe-address` instead;
+2. with the old Safe of each node (as registered on dufour), closes the channels between the nodes
+   and the `--counterparty-address` nodes, and between the nodes themselves. dufour is not indexed by
+   Blokli, so the status of each of these channels is read on-chain;
+3. lets each node whose identity file is provided transfer its xDAI to its old Safe;
+4. transfers the wxHOPR of the old Safe to the new Safe, and splits the xDAI of the old Safe evenly
+   between the nodes.
+
+The dufour contract addresses come from `config/v3.0.1-contracts-addresses.json`, a copy of
+[`contracts-addresses.json` of hoprnet/contracts v3.0.1](https://github.com/hoprnet/contracts/blob/v3.0.1/ethereum/contracts/contracts-addresses.json).
+The old Safe must have a threshold of 1. Its owner signs with `--old-safe-owner-private-key` (or
+`OLD_SAFE_OWNER_PRIVATE_KEY`), which defaults to `--private-key`. The old Safe is otherwise left
+unchanged. Once migrated, start the nodes on the new network with the new Safe and module: they
+register with the new Safe on start.
+
 ### 4. Winning probability
 
 Set:
