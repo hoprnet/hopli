@@ -76,6 +76,45 @@ Supported environment variables:
 
 Equivalent CLI flags are available (`--password-path`, `--new-password-path`, `--private-key`).
 
+### Hardware wallets
+
+Commands that take `--private-key` can sign their transactions with an account of a Ledger or Trezor
+device instead:
+
+- `--ledger`: a Ledger device, unlocked, with the Ethereum app open
+- `--trezor`: a Trezor device, unlocked
+- `--hd-index <INDEX>` (default `0`): the account at `m/44'/60'/<INDEX>'/0/0` on a Ledger (Ledger Live
+  path), or at `m/44'/60'/0'/0/<INDEX>` on a Trezor
+- `--hd-path <PATH>`: an account at a custom derivation path, e.g. `m/44'/60'/0'/0/1`
+
+```bash
+hopli safe-module add-node \
+  --network anvil-localhost \
+  --provider-url http://127.0.0.1:8545 \
+  --safe-address 0xSafe... \
+  --module-address 0xModule... \
+  --identity-from-path ./identities/node.id \
+  --password-path ./secrets/identity.pwd \
+  --ledger --hd-index 1
+```
+
+The device asks to confirm each transaction. Safe transactions are executed by the Safe owner
+itself, so the device only signs transactions, never raw hashes; the Safe must have a threshold of 1,
+as with a private key.
+
+Hardware wallet support is enabled by default (cargo feature `hardware-wallets`, made of `ledger` and
+`trezor`). It talks to the devices over USB with libusb, which is always built from source, so no
+system libusb is needed. To leave it out:
+
+```bash
+cargo build --release --no-default-features   # or --no-default-features --features ledger
+```
+
+A binary built without these features rejects `--ledger` and `--trezor` with an error.
+
+On Linux, accessing the device as a non-root user needs the udev rules published by Ledger or Trezor
+in their Linux setup instructions.
+
 ## Commands
 
 Get top-level help:
