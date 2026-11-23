@@ -163,6 +163,10 @@ pub enum HelperErrors {
     // general error of parsing
     #[error("Cannot parse: {0}")]
     ParseError(String),
+
+    /// Error with a hardware wallet
+    #[error("hardware wallet error: {0}")]
+    HardwareWallet(String),
 }
 
 // Used instead of From implementation to avoid alloy being a dependency of the primitive crates
