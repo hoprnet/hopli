@@ -35,6 +35,27 @@
 //! - [SafeModuleSubcommands::CheckSafe] inspects a Safe address and reports its setup: owners, threshold, attached
 //!   modules, the HOPR module's targets (channels/announcement), the linked nodes and their node-safe registry status,
 //!   and which known HOPR network configuration matches the on-chain state.
+//! - [SafeModuleSubcommands::DecommissionNodes] decommissions nodes by closing all their channels, on behalf of the
+//!   Safe each node is registered with. Channel states are read from a Blokli indexer. The signer must be an owner of
+//!   the Safe, and the Safe must have a threshold of 1. Detailed breakdown of the steps:
+//!     - close all the incoming channels (Open or PendingToClose) of every node
+//!     - initiate the closure of all the Open outgoing channels of every node
+//!     - read the on-chain closure time of every PendingToClose outgoing channel (closure initiation time plus
+//!       `NOTICE_PERIOD_CHANNEL_CLOSURE`)
+//!     - finalize the closure of each outgoing channel once its closure time has passed
+//!     - for each node whose identity file is provided, transfer its remaining xDAI to its Safe, keeping only the fee
+//!       of this last transfer
+//!
+//!   Channel operations are bundled into Safe transactions of at most `--batch-size` channels each.
+//! - [SafeModuleSubcommands::MigrateFromV3] migrates nodes from the dufour (v3) network to the given network in one go.
+//!   The old Safe and the new Safe may have different owners. Detailed breakdown of the steps (see [crate::migration]):
+//!     - create a new Safe and module pair on the given network, with the nodes included in the module (or use an
+//!       existing one with `--new-safe-address`)
+//!     - with the old Safe, close the channels on dufour between the nodes and the given counterparties, and between
+//!       the nodes themselves. The status of each channel is read on-chain, as dufour is not indexed by Blokli
+//!     - for each node whose identity file is provided, transfer its xDAI to its old Safe
+//!     - transfer the wxHOPR of the old Safe to the new Safe, and split the xDAI of the old Safe evenly between the
+//!       nodes
 //!
 //! Some sample commands
 //! - Create a Safe and module with a 10.5 HOPR channels allowance, fund the Safe with 10 HOPR, and send 0.1 native
@@ -140,6 +161,33 @@
 //!     --provider-url "http://localhost:8545"
 //! ```
 //! 
+//! - Decommission nodes by closing all their channels through their Safe, and returning the xDAI of the nodes
+//!   whose identity files are provided to their Safe
+//! ```text
+//! hopli safe-module decommission-nodes \
+//!     --network jura-prod \
+//!     --identity-directory "./test" \
+//!     --password-path "./test/pwd" \
+//!     --node-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+//!     --blokli-url "https://blokli.jura.hoprnet.link" \
+//!     --batch-size 30 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "https://gnosis-rpc.example/"
+//! ```
+//! 
+//! - Migrate nodes from dufour (v3) to jura-prod, closing their channels with the given counterparties
+//! ```text
+//! hopli safe-module migrate-from-v3 \
+//!     --network jura-prod \
+//!     --identity-directory "./test" \
+//!     --password-path "./test/pwd" \
+//!     --counterparty-address 0x47f2710069F01672D01095cA252018eBf08bF85e,0x0D07Eb66Deb54D48D004765E13DcC028cf56592b \
+//!     --admin-address 0x93a50B0fFF7b4ED36A3C6445e280E72AC2AEFc51 \
+//!     --old-safe-owner-private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+//!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+//!     --provider-url "https://gnosis-rpc.example/"
+//! ```
+//! 
 //! - Add a new contract target to the module
 //! ```text
 //! hopli safe-module add-target \
@@ -150,32 +198,43 @@
 //!     --private-key 59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
 //!     --provider-url "http://localhost:8545"
 //! ```
-use std::str::FromStr;
+use std::{
+    collections::{BTreeSet, HashMap},
+    str::FromStr,
+    time::Duration,
+};
 
 use clap::{Parser, builder::RangedU64ValueParser};
 use hopr_bindings::{
     exports::alloy::{
-        primitives::{Address, U256, utils::parse_units},
+        primitives::{
+            Address, U256,
+            utils::{format_units, parse_units},
+        },
         providers::Provider,
     },
+    hopr_channels::HoprChannels,
     hopr_node_safe_registry::HoprNodeSafeRegistry,
     hopr_node_stake_factory::HoprNodeStakeFactory,
     hopr_token::HoprToken,
 };
-use hopr_types::crypto::keypairs::Keypair;
+use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{info, warn};
 
 use crate::{
-    environment_config::NetworkProviderArgs,
-    key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, PrivateKeyArgs},
+    channels::{DEFAULT_CHANNEL_BATCH_SIZE, NodeWithSafe, close_all_channels_of_nodes, new_blokli_client},
+    environment_config::{DUFOUR_NETWORK_NAME, NetworkProviderArgs, get_v3_network_addresses},
+    key_pair::{ArgEnvReader, IdentityFileArgs, ManagerPrivateKeyArgs, OldSafeOwnerPrivateKeyArgs, PrivateKeyArgs},
     methods::{
         SafeSingleton, add_new_network_target_to_module, add_service_registry_target_to_module, check_safe_setup,
         create_new_module_and_include_nodes, create_new_module_include_nodes_and_remove_old_module,
         debug_node_safe_module_setup_main, debug_node_safe_module_setup_on_balance_and_registries,
         deploy_safe_module_with_targets_and_nodes, deregister_nodes_from_node_safe_registry_and_remove_from_module,
-        fill_node_registry_status, include_nodes_to_module, migrate_nodes, transfer_native_tokens,
+        ensure_safe_executable_by_signer, fill_node_registry_status, get_notice_period_channel_closure,
+        include_nodes_to_module, migrate_nodes, transfer_all_native_tokens, transfer_native_tokens,
         transfer_or_mint_tokens,
     },
+    migration::{NewSafe, V3Migration, migrate_nodes_from_v3},
     utils::{Cmd, HelperErrors, a2h},
 };
 
@@ -549,6 +608,142 @@ pub enum SafeModuleSubcommands {
         /// Access to the private key of a safe owner
         #[command(flatten)]
         private_key: PrivateKeyArgs,
+    },
+
+    /// Decommission nodes: close all their incoming and outgoing channels on behalf of their Safe, then return
+    /// the xDAI of the nodes whose identity files are provided to their Safe
+    #[command(visible_alias = "dn")]
+    DecommissionNodes {
+        /// Network name, contracts config file root, and customized provider, if available
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses. Not needed for nodes whose identity files are provided; \
+                    only nodes whose identity files are provided get their xDAI returned to the Safe",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// URL of the Blokli indexer of the network
+        #[clap(
+            help = "Blokli indexer URL, e.g. https://blokli.jura.hoprnet.link",
+            long,
+            short = 'b',
+            env = "HOPLI_BLOKLI_URL"
+        )]
+        blokli_url: String,
+
+        /// Maximum number of channels closed in one Safe transaction
+        #[clap(
+            help = "Maximum number of channels processed in one Safe transaction, to stay below the block gas limit",
+            long,
+            value_parser = RangedU64ValueParser::<usize>::new().range(1..=500),
+            default_value_t = DEFAULT_CHANNEL_BATCH_SIZE
+        )]
+        batch_size: usize,
+
+        /// Access to the private key of a Safe owner
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+    },
+
+    /// Migrate nodes from the dufour (v3) network: create a new Safe and module with the nodes on the given network,
+    /// close the channels of the nodes on dufour, then move the wxHOPR of their old Safe to the new Safe and split
+    /// the xDAI of the old Safe and of the nodes evenly between the nodes
+    #[command(visible_alias = "mv3")]
+    MigrateFromV3 {
+        /// Network to migrate to (e.g. jura-prod), contracts config file root, and customized provider
+        #[command(flatten)]
+        network_provider: NetworkProviderArgs,
+
+        /// Arguments to locate identity file(s) of HOPR node(s)
+        #[command(flatten)]
+        local_identity: IdentityFileArgs,
+
+        /// node addresses
+        #[clap(
+            help = "Comma separated node Ethereum addresses. Not needed for nodes whose identity files are provided; \
+                    only nodes whose identity files are provided return their xDAI before it is split",
+            long,
+            short = 'o',
+            default_value = None
+        )]
+        node_address: Option<String>,
+
+        /// Possible counterparties of the channels of the nodes on dufour
+        #[clap(
+            help = "Comma separated addresses of the nodes that may have channels with the migrated nodes on dufour. \
+                    Channels between the migrated nodes are closed as well",
+            long,
+            default_value = None
+        )]
+        counterparty_address: Option<String>,
+
+        /// Owners of the new Safe
+        #[clap(
+            help = "Comma separated owner addresses of the new Safe. Defaults to the signer of --private-key",
+            long,
+            short = 'a',
+            default_value = None,
+            conflicts_with = "new_safe_address"
+        )]
+        admin_address: Option<String>,
+
+        /// Threshold of the new Safe
+        #[clap(
+            help = "Threshold of the new Safe, e.g. 1",
+            long,
+            short,
+            value_parser = RangedU64ValueParser::<u32>::new().range(1..),
+            default_value_t = 1,
+            conflicts_with = "new_safe_address"
+        )]
+        threshold: u32,
+
+        /// Allowance of the channels contract to manage the HOPR tokens of the new Safe
+        #[clap(
+            help = "Allowance of the channels contract to manage the HOPR tokens of the new Safe. Value in ether, \
+                    e.g. 10. Defaults to the allowance of the stake factory",
+            long,
+            short = 'l',
+            value_parser = clap::value_parser!(f64),
+            conflicts_with = "new_safe_address"
+        )]
+        allowance: Option<f64>,
+
+        /// Existing Safe to migrate to
+        #[clap(
+            help = "Safe on the new network to migrate to, e.g. created by a previous run, instead of creating a new \
+                    Safe and module. Its module must already include the nodes",
+            long,
+            default_value = None
+        )]
+        new_safe_address: Option<String>,
+
+        /// Maximum number of channels closed in one Safe transaction
+        #[clap(
+            help = "Maximum number of channels processed in one Safe transaction, to stay below the block gas limit",
+            long,
+            value_parser = RangedU64ValueParser::<usize>::new().range(1..=500),
+            default_value_t = DEFAULT_CHANNEL_BATCH_SIZE
+        )]
+        batch_size: usize,
+
+        /// Access to the private key that creates the new Safe and, by default, owns it
+        #[command(flatten)]
+        private_key: PrivateKeyArgs,
+
+        /// Access to the private key of an owner of the old Safe, if it differs from `--private-key`
+        #[command(flatten)]
+        old_safe_owner_private_key: OldSafeOwnerPrivateKeyArgs,
     },
 }
 
@@ -1353,6 +1548,257 @@ impl SafeModuleSubcommands {
 
         Ok(())
     }
+
+    /// Execute the command which decommissions nodes: it closes all the channels of the given nodes, on behalf of
+    /// the Safe each node is registered with in the Node-Safe registry.
+    ///
+    /// 1. Close all the incoming channels (Open or PendingToClose) of every node
+    /// 2. Initiate the closure of all the Open outgoing channels of every node
+    /// 3. Collect the PendingToClose outgoing channels of every node, i.e. those indexed by Blokli and those initiated
+    ///    in step 2 (which Blokli may not have indexed yet), and read their closure time on-chain
+    /// 4. Finalize the closure of each outgoing channel once its own closure time has passed, i.e. once
+    ///    `block.timestamp > closureTime`, where `closureTime` is the timestamp of the block that included its
+    ///    `initiateOutgoingChannelClosureSafe` plus `NOTICE_PERIOD_CHANNEL_CLOSURE`. Channels of all the nodes are
+    ///    handled together, so the notice period is not waited once per node.
+    /// 5. For each node whose identity file is provided, transfer its remaining xDAI to its Safe, minus the fee of this
+    ///    last transfer. Nodes only given by address keep their xDAI, as their key is needed to sign.
+    ///
+    /// The channel closure itself is implemented by [close_all_channels_of_nodes].
+    pub async fn execute_decommission_nodes(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        blokli_url: String,
+        batch_size: usize,
+        private_key: PrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        /// Maximum interval between two checks of the chain time while waiting for the notice period
+        const WAIT_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+        // read all the node addresses, without duplicates
+        let mut node_eth_addresses: BTreeSet<Address> = BTreeSet::new();
+        if let Some(addresses) = node_address {
+            for addr in addresses.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+                node_eth_addresses.insert(
+                    Address::from_str(addr)
+                        .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid node address: {e:?}")))?,
+                );
+            }
+        }
+        // if local identity dirs/path is provided, read the keys of the nodes from identity files,
+        // which are needed to return the xDAI of the nodes to their Safe
+        let node_keys: HashMap<Address, ChainKeypair> = local_identity
+            .to_chain_keys()?
+            .into_iter()
+            .map(|chain_key| (a2h(chain_key.public().to_address()), chain_key))
+            .collect();
+        node_eth_addresses.extend(node_keys.keys().copied());
+        if node_eth_addresses.is_empty() {
+            return Err(HelperErrors::MissingParameter(
+                "provide node addresses or identity files of the nodes".into(),
+            ));
+        }
+
+        // read private key
+        let signer_private_key = private_key.read_default()?;
+        let signer_address = a2h(signer_private_key.public().to_address());
+        // get RPC provider for the given network and environment
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+        let blokli = new_blokli_client(&blokli_url)?;
+
+        let channels = HoprChannels::new(contract_addresses.addresses.channels, rpc_provider.clone());
+        let node_safe_registry =
+            HoprNodeSafeRegistry::new(contract_addresses.addresses.node_safe_registry, rpc_provider.clone());
+
+        let notice_period = get_notice_period_channel_closure(channels.clone()).await?;
+        info!(
+            "NOTICE_PERIOD_CHANNEL_CLOSURE of network {} is {} seconds: outgoing channels can be finalized at the \
+             earliest this long after their closure is initiated",
+            network_provider.network, notice_period
+        );
+
+        // find the Safe of each node
+        let mut nodes: Vec<NodeWithSafe> = Vec::new();
+        let mut checked_safes: BTreeSet<Address> = BTreeSet::new();
+        for node in node_eth_addresses {
+            let safe = node_safe_registry.nodeToSafe(node).call().await?;
+            if safe.is_zero() {
+                warn!("node {:?} is not registered with any safe, skipping it", node);
+                continue;
+            }
+            if checked_safes.insert(safe) {
+                ensure_safe_executable_by_signer(SafeSingleton::new(safe, rpc_provider.clone()), signer_address)
+                    .await?;
+            }
+            info!("node {:?} is registered with safe {:?}", node, safe);
+            nodes.push(NodeWithSafe { node, safe });
+        }
+
+        let summary = close_all_channels_of_nodes(
+            &blokli,
+            &signer_private_key,
+            channels,
+            &nodes,
+            batch_size,
+            WAIT_POLL_INTERVAL,
+        )
+        .await?;
+        info!(
+            "all the channels of the nodes are closed: {} incoming closed, {} outgoing finalized",
+            summary.incoming_closed, summary.outgoing_finalized
+        );
+
+        // 5. return the xDAI of the nodes to their Safe, keeping only the fee of this last transfer
+        for NodeWithSafe { node, safe } in nodes {
+            let Some(node_key) = node_keys.get(&node) else {
+                info!(
+                    "node {:?}: no identity file is provided, its xDAI is not returned to the safe",
+                    node
+                );
+                continue;
+            };
+            let node_provider = network_provider.get_provider_with_signer(node_key).await?;
+            // logs the transferred amount
+            transfer_all_native_tokens(node_provider, safe).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Execute the command which migrates nodes from the dufour (v3) network to the given network.
+    /// See [crate::migration] for the detailed steps.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_migrate_from_v3(
+        network_provider: NetworkProviderArgs,
+        local_identity: IdentityFileArgs,
+        node_address: Option<String>,
+        counterparty_address: Option<String>,
+        admin_address: Option<String>,
+        threshold: u32,
+        allowance: Option<f64>,
+        new_safe_address: Option<String>,
+        batch_size: usize,
+        private_key: PrivateKeyArgs,
+        old_safe_owner_private_key: OldSafeOwnerPrivateKeyArgs,
+    ) -> Result<(), HelperErrors> {
+        /// Maximum interval between two checks of the chain time while waiting for the notice period
+        const WAIT_POLL_INTERVAL: Duration = Duration::from_secs(30);
+        /// dufour is deployed on Gnosis chain
+        const DUFOUR_CHAIN_ID: u64 = 100;
+
+        if network_provider.network == DUFOUR_NETWORK_NAME {
+            return Err(HelperErrors::ParseError(
+                "--network must be the network to migrate to, e.g. jura-prod".into(),
+            ));
+        }
+
+        // read the nodes, and the keys of the nodes whose identity files are provided
+        let node_keys: HashMap<Address, ChainKeypair> = local_identity
+            .to_chain_keys()?
+            .into_iter()
+            .map(|chain_key| (a2h(chain_key.public().to_address()), chain_key))
+            .collect();
+        let mut nodes: BTreeSet<Address> = parse_addresses(node_address.as_deref(), "node")?.into_iter().collect();
+        nodes.extend(node_keys.keys().copied());
+        if nodes.is_empty() {
+            return Err(HelperErrors::MissingParameter(
+                "provide node addresses or identity files of the nodes".into(),
+            ));
+        }
+        let counterparties = parse_addresses(counterparty_address.as_deref(), "counterparty")?;
+
+        // read private keys and build providers
+        let signer_private_key = private_key.read_default()?;
+        let signer_address = a2h(signer_private_key.public().to_address());
+        let old_owner_key = old_safe_owner_private_key.read_or(&signer_private_key)?;
+        let rpc_provider = network_provider.get_provider_with_signer(&signer_private_key).await?;
+        let chain_id = rpc_provider
+            .get_chain_id()
+            .await
+            .map_err(|e| HelperErrors::MiddlewareError(e.to_string()))?;
+        if chain_id != DUFOUR_CHAIN_ID {
+            return Err(HelperErrors::MiddlewareError(format!(
+                "the provider is connected to chain {chain_id}, but {DUFOUR_NETWORK_NAME} is on chain \
+                 {DUFOUR_CHAIN_ID}"
+            )));
+        }
+        let contract_addresses = network_provider.get_network_details_from_name()?;
+        let old_owner_provider = network_provider.get_provider_with_signer(&old_owner_key).await?;
+        let mut node_providers = Vec::with_capacity(node_keys.len());
+        for node_key in node_keys.values() {
+            node_providers.push(network_provider.get_provider_with_signer(node_key).await?);
+        }
+
+        let new_safe = match new_safe_address {
+            Some(safe) => NewSafe::Existing(
+                Address::from_str(&safe)
+                    .map_err(|_| HelperErrors::InvalidAddress(format!("Cannot parse safe address {safe:?}")))?,
+            ),
+            None => {
+                let admins = parse_addresses(admin_address.as_deref(), "admin")?;
+                NewSafe::Create {
+                    admins: if admins.is_empty() {
+                        vec![signer_address]
+                    } else {
+                        admins
+                    },
+                    threshold,
+                    allowance,
+                }
+            }
+        };
+
+        let summary = migrate_nodes_from_v3(V3Migration {
+            old_network: get_v3_network_addresses(DUFOUR_NETWORK_NAME)?,
+            old_owner_provider,
+            old_owner_key,
+            new_stake_factory: HoprNodeStakeFactory::new(
+                contract_addresses.addresses.node_stake_factory,
+                rpc_provider.clone(),
+            ),
+            new_channels: contract_addresses.addresses.channels,
+            new_token: contract_addresses.addresses.token,
+            new_safe,
+            nodes: nodes.into_iter().collect(),
+            node_providers,
+            counterparties,
+            batch_size,
+            poll_interval: WAIT_POLL_INTERVAL,
+        })
+        .await?;
+
+        println!("safe {:?}", summary.new_safe);
+        if let Some(module) = summary.new_module {
+            println!("node_module {:?}", module);
+        }
+        info!(
+            "migration to {} done: {} wxHOPR moved to the new safe {:?}, each node received {} xDAI",
+            network_provider.network,
+            format_units(summary.tokens_to_new_safe, "ether").unwrap_or_default(),
+            summary.new_safe,
+            format_units(summary.xdai_per_node, "ether").unwrap_or_default()
+        );
+        info!(
+            "start the nodes on {} with the new safe and module: they register with the new safe on start",
+            network_provider.network
+        );
+        Ok(())
+    }
+}
+
+/// Parse comma separated addresses, ignoring empty items. `what` names the addresses in errors.
+fn parse_addresses(addresses: Option<&str>, what: &str) -> Result<Vec<Address>, HelperErrors> {
+    addresses
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(|a| {
+            Address::from_str(a)
+                .map_err(|e| HelperErrors::InvalidAddress(format!("Invalid {what} address {a:?}: {e:?}")))
+        })
+        .collect()
 }
 
 impl Cmd for SafeModuleSubcommands {
@@ -1539,6 +1985,52 @@ impl Cmd for SafeModuleSubcommands {
                 )
                 .await
             }
+            SafeModuleSubcommands::DecommissionNodes {
+                network_provider,
+                local_identity,
+                node_address,
+                blokli_url,
+                batch_size,
+                private_key,
+            } => {
+                SafeModuleSubcommands::execute_decommission_nodes(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    blokli_url,
+                    batch_size,
+                    private_key,
+                )
+                .await
+            }
+            SafeModuleSubcommands::MigrateFromV3 {
+                network_provider,
+                local_identity,
+                node_address,
+                counterparty_address,
+                admin_address,
+                threshold,
+                allowance,
+                new_safe_address,
+                batch_size,
+                private_key,
+                old_safe_owner_private_key,
+            } => {
+                SafeModuleSubcommands::execute_migrate_from_v3(
+                    network_provider,
+                    local_identity,
+                    node_address,
+                    counterparty_address,
+                    admin_address,
+                    threshold,
+                    allowance,
+                    new_safe_address,
+                    batch_size,
+                    private_key,
+                    old_safe_owner_private_key,
+                )
+                .await
+            }
         }
     }
 }
@@ -1560,6 +2052,73 @@ mod tests {
             identity_from_path: None,
             password: PasswordArgs::default(),
         }
+    }
+
+    #[test]
+    fn test_parse_addresses() -> anyhow::Result<()> {
+        assert!(parse_addresses(None, "node")?.is_empty());
+        assert!(parse_addresses(Some(" , "), "node")?.is_empty());
+        assert_eq!(
+            parse_addresses(
+                Some("0x47f2710069F01672D01095cA252018eBf08bF85e, 0x0D07Eb66Deb54D48D004765E13DcC028cf56592b,"),
+                "node"
+            )?,
+            vec![
+                Address::from_str("0x47f2710069F01672D01095cA252018eBf08bF85e")?,
+                Address::from_str("0x0D07Eb66Deb54D48D004765E13DcC028cf56592b")?
+            ]
+        );
+        assert!(matches!(
+            parse_addresses(Some("0x1234"), "counterparty"),
+            Err(HelperErrors::InvalidAddress(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_migrate_from_v3_arguments() -> anyhow::Result<()> {
+        let base = [
+            "safe-module",
+            "migrate-from-v3",
+            "--network",
+            "jura-prod",
+            "--provider-url",
+            "https://gnosis-rpc.example/",
+            "--node-address",
+            "0x47f2710069F01672D01095cA252018eBf08bF85e",
+            "--counterparty-address",
+            "0x0D07Eb66Deb54D48D004765E13DcC028cf56592b",
+        ];
+        match SafeModuleSubcommands::try_parse_from(base)? {
+            SafeModuleSubcommands::MigrateFromV3 {
+                threshold,
+                allowance,
+                new_safe_address,
+                batch_size,
+                counterparty_address,
+                ..
+            } => {
+                assert_eq!(threshold, 1);
+                assert_eq!(allowance, None);
+                assert_eq!(new_safe_address, None);
+                assert_eq!(batch_size, DEFAULT_CHANNEL_BATCH_SIZE);
+                assert_eq!(
+                    counterparty_address.as_deref(),
+                    Some("0x0D07Eb66Deb54D48D004765E13DcC028cf56592b")
+                );
+            }
+            other => panic!("unexpected subcommand {other:?}"),
+        }
+
+        // an existing new safe cannot be combined with the owners of a safe to create
+        let with_existing_safe_and_admins = base.iter().copied().chain([
+            "--new-safe-address",
+            "0xce66d19a86600f3c6eb61edd6c431ded5cc92b21",
+            "--admin-address",
+            "0x47f2710069F01672D01095cA252018eBf08bF85e",
+        ]);
+        assert!(SafeModuleSubcommands::try_parse_from(with_existing_safe_and_admins).is_err());
+        Ok(())
     }
 
     #[tokio::test]

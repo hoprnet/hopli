@@ -7,7 +7,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use std::{ops::Add, str::FromStr, sync::Arc};
+use std::{ops::Add, str::FromStr, sync::Arc, time::Duration};
 
 use IMulticall3Extract::IMulticall3ExtractInstance;
 use SafeSingleton::{SafeSingletonInstance, execTransactionCall, removeOwnerCall, setupCall};
@@ -30,11 +30,12 @@ use hopr_bindings::{
             bindings::IMulticall3::{Call3, aggregate3Call},
             fillers::*,
         },
-        rpc::types::TransactionRequest,
+        rpc::types::{BlockNumberOrTag, TransactionRequest},
         signers::{Signer, local::PrivateKeySigner},
         sol,
         sol_types::{SolCall, SolValue},
     },
+    hopr_channels::HoprChannels::{HoprChannelsInstance, channelsReturn},
     hopr_node_management_module::HoprNodeManagementModule::{
         HoprNodeManagementModuleInstance, addChannelsAndTokenTargetCall, includeNodeCall, initializeCall,
         removeNodeCall, scopeTargetServiceRegistryCall, scopeTargetTokenCall,
@@ -44,12 +45,13 @@ use hopr_bindings::{
     },
     hopr_node_safe_registry::HoprNodeSafeRegistry::{HoprNodeSafeRegistryInstance, deregisterNodeBySafeCall},
     hopr_node_stake_factory::HoprNodeStakeFactory::{HoprNodeStakeFactoryInstance, cloneCall},
-    hopr_token::HoprToken::{HoprTokenInstance, approveCall},
+    hopr_token::HoprToken::{HoprTokenInstance, approveCall, transferCall},
 };
 use hopr_types::crypto::keypairs::{ChainKeypair, Keypair};
 use tracing::{debug, info};
 
 use crate::{
+    channels::{ChannelClosureAction, ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE, PendingOutgoingClosure, get_channel_id},
     payloads::{edge_node_deploy_safe_module_and_maybe_include_node, transfer_native_token_payload},
     utils::{HelperErrors, build_default_target, get_create2_address},
 };
@@ -339,6 +341,81 @@ pub async fn send_multisend_safe_transaction_with_threshold_one<P: WalletProvide
     .await
 }
 
+/// Split `total` evenly between `count` recipients. Returns the amount per recipient, and the remainder that
+/// cannot be split.
+pub fn split_evenly(total: U256, count: usize) -> (U256, U256) {
+    if count == 0 {
+        return (U256::ZERO, total);
+    }
+    let count = U256::from(count);
+    (total / count, total % count)
+}
+
+/// In one Safe transaction, transfer all the tokens of the Safe to `token_recipient`, and split all the native
+/// tokens of the Safe evenly between `native_recipients`. The remainder of the split stays in the Safe.
+///
+/// The fee of the Safe transaction is paid by the owner who executes it, not by the Safe.
+/// Returns the amount of tokens transferred and the amount of native tokens sent to each recipient.
+pub async fn transfer_safe_funds<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    owner_chain_key: ChainKeypair,
+    token: HoprTokenInstance<Arc<P>>,
+    token_recipient: Address,
+    native_recipients: &[Address],
+) -> Result<(U256, U256), HelperErrors> {
+    let safe_address = *safe.address();
+    let token_balance = token.balanceOf(safe_address).call().await?;
+    let native_balance = safe.provider().get_balance(safe_address).await?;
+    let (native_per_recipient, _) = split_evenly(native_balance, native_recipients.len());
+
+    let mut multisend_txns: Vec<MultisendTransaction> = Vec::new();
+    if !token_balance.is_zero() {
+        multisend_txns.push(MultisendTransaction {
+            encoded_data: transferCall {
+                recipient: token_recipient,
+                amount: token_balance,
+            }
+            .abi_encode()
+            .into(),
+            tx_operation: SafeTxOperation::Call,
+            to: *token.address(),
+            value: U256::ZERO,
+        });
+    }
+    if !native_per_recipient.is_zero() {
+        multisend_txns.extend(native_recipients.iter().map(|recipient| MultisendTransaction {
+            encoded_data: Bytes::new(),
+            tx_operation: SafeTxOperation::Call,
+            to: *recipient,
+            value: native_per_recipient,
+        }));
+    }
+    if multisend_txns.is_empty() {
+        info!("safe {:?} has no funds to transfer", safe_address);
+        return Ok((U256::ZERO, U256::ZERO));
+    }
+
+    let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+    send_multisend_safe_transaction_with_threshold_one(
+        safe,
+        owner_chain_key,
+        SAFE_MULTISEND_ADDRESS,
+        multisend_txns,
+        chain_id,
+        safe_nonce,
+    )
+    .await?;
+    info!(
+        "safe {:?} transferred {} tokens to {:?}, and {} native tokens to each of {:?}",
+        safe_address,
+        format_units(token_balance, "ether").unwrap_or_else(|_| token_balance.to_string()),
+        token_recipient,
+        format_units(native_per_recipient, "ether").unwrap_or_else(|_| native_per_recipient.to_string()),
+        native_recipients
+    );
+    Ok((token_balance, native_per_recipient))
+}
+
 /// Get chain id and safe nonce
 pub async fn get_chain_id_and_safe_nonce<P: Provider>(
     safe: SafeSingletonInstance<P>,
@@ -519,6 +596,67 @@ pub async fn transfer_native_tokens<P: Provider + WalletProvider>(
     let tx = transfer_native_token_payload(addresses, amounts)?;
     provider.send_transaction(tx.clone()).await?.watch().await?;
     Ok(tx.value.unwrap_or_default())
+}
+
+/// Transfer all the native tokens of the caller (the default signer of the provider) to `recipient`,
+/// keeping only the amount needed to pay for this transfer.
+///
+/// The gas limit of the transfer is estimated (a Safe proxy consumes more than 21000 gas when receiving
+/// native tokens) and the transaction uses a fixed (legacy) gas price, so that its fee is known in advance and
+/// can be deducted from the transferred amount. Returns the amount transferred, which is zero when the balance
+/// cannot cover the fee.
+pub async fn transfer_all_native_tokens<P: Provider + WalletProvider>(
+    provider: Arc<P>,
+    recipient: Address,
+) -> Result<U256, HelperErrors> {
+    let sender = provider.default_signer_address();
+    let balance = provider.get_balance(sender).await?;
+    if balance.is_zero() {
+        info!("{:?} has no native tokens, skip the transfer", sender);
+        return Ok(U256::ZERO);
+    }
+
+    // the amount does not change the gas used by a plain transfer; zero avoids balance checks of the estimation
+    let gas_limit = provider
+        .estimate_gas(
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(recipient)
+                .with_value(U256::ZERO),
+        )
+        .await?;
+    let gas_price = provider.get_gas_price().await?;
+    let fee = U256::from(gas_limit) * U256::from(gas_price);
+
+    if balance <= fee {
+        info!(
+            "{:?} has {} native tokens, not enough to pay the transfer fee of {}, skip the transfer",
+            sender, balance, fee
+        );
+        return Ok(U256::ZERO);
+    }
+
+    let amount = balance - fee;
+    let tx = TransactionRequest::default()
+        .with_from(sender)
+        .with_to(recipient)
+        .with_value(amount)
+        .with_gas_limit(gas_limit)
+        .with_gas_price(gas_price);
+    let receipt = provider.send_transaction(tx).await?.get_receipt().await?;
+    if !receipt.status() {
+        return Err(HelperErrors::MiddlewareError(format!(
+            "transfer of native tokens from {sender:?} to {recipient:?} failed in tx {:?}",
+            receipt.transaction_hash
+        )));
+    }
+    info!(
+        "{:?} transferred {} native tokens to {:?}",
+        sender,
+        format_units(amount, "ether").unwrap_or_else(|_| amount.to_string()),
+        recipient
+    );
+    Ok(amount)
 }
 
 /// Helper function to predict module address. Note that here the caller is the contract deployer
@@ -1547,6 +1685,219 @@ pub async fn fill_node_registry_status<P: Provider>(
     Ok(())
 }
 
+/// Make sure that the signer can execute Safe transactions alone, i.e. it is an owner of the Safe
+/// and the Safe threshold is one.
+pub async fn ensure_safe_executable_by_signer<P: Provider>(
+    safe: SafeSingletonInstance<P>,
+    signer: Address,
+) -> Result<(), HelperErrors> {
+    let provider = safe.provider();
+    let (owners, threshold) = provider
+        .multicall()
+        .add(safe.getOwners())
+        .add(safe.getThreshold())
+        .aggregate()
+        .await?;
+    let reason = if !owners.contains(&signer) {
+        Some("signer is not an owner".to_string())
+    } else if threshold != U256::ONE {
+        Some(format!("threshold is {threshold}, but only threshold 1 is supported"))
+    } else {
+        None
+    };
+    match reason {
+        Some(reason) => Err(HelperErrors::NotSafeExecutor {
+            signer: format!("{signer:?}"),
+            safe: format!("{:?}", safe.address()),
+            reason,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Execute a channel closure action for many counterparties of a node, through the Safe.
+///
+/// Counterparties are split into batches of at most `batch_size` items, to stay below the block gas limit.
+/// Each batch is one Safe transaction (signed by the Safe owner) that delegatecalls the MultiSend contract,
+/// which calls the HoprChannels contract once per counterparty. The Safe is the `msg.sender` of each call,
+/// which is required by the `*Safe` functions of HoprChannels.
+///
+/// Before sending, the on-chain status of each channel is checked and channels on which the action cannot be
+/// applied are skipped.
+///
+/// Returns the number of channels on which the action has been executed.
+pub async fn execute_channel_closure_through_safe<P: WalletProvider + Provider>(
+    safe: SafeSingletonInstance<Arc<P>>,
+    owner_chain_key: ChainKeypair,
+    channels: HoprChannelsInstance<Arc<P>>,
+    action: ChannelClosureAction,
+    node_address: Address,
+    counterparties: &[Address],
+    batch_size: usize,
+) -> Result<usize, HelperErrors> {
+    if batch_size == 0 {
+        return Err(HelperErrors::MissingParameter(
+            "batch size must be greater than zero".into(),
+        ));
+    }
+    // drop channels whose state indexed by Blokli is outdated, otherwise a whole batch reverts
+    let counterparties =
+        filter_counterparties_by_onchain_channel_status(&channels, action, node_address, counterparties).await?;
+    let channels_address = *channels.address();
+    let total_batches = counterparties.len().div_ceil(batch_size);
+    for (index, batch) in counterparties.chunks(batch_size).enumerate() {
+        // nonce must be read again for every batch, as the previous batch has increased it
+        let (chain_id, safe_nonce) = get_chain_id_and_safe_nonce(safe.clone()).await?;
+
+        let multisend_txns: Vec<MultisendTransaction> = batch
+            .iter()
+            .map(|counterparty| MultisendTransaction {
+                encoded_data: action.encode(node_address, *counterparty),
+                tx_operation: SafeTxOperation::Call,
+                to: channels_address,
+                value: U256::ZERO,
+            })
+            .collect();
+
+        send_multisend_safe_transaction_with_threshold_one(
+            safe.clone(),
+            owner_chain_key.clone(),
+            SAFE_MULTISEND_ADDRESS,
+            multisend_txns,
+            chain_id,
+            safe_nonce,
+        )
+        .await?;
+        info!(
+            "node {:?}: batch {}/{} done, {} {} ({:?})",
+            node_address,
+            index + 1,
+            total_batches,
+            batch.len(),
+            action.describe(),
+            batch
+        );
+    }
+    Ok(counterparties.len())
+}
+
+/// Read the on-chain state of channels, given as `(source, destination)` pairs, in chunks of Multicall3 calls
+async fn read_channel_states<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    endpoints: &[(Address, Address)],
+) -> Result<Vec<channelsReturn>, HelperErrors> {
+    // number of channel reads aggregated in one Multicall3 call
+    const READ_CHUNK_SIZE: usize = 100;
+
+    let mut states = Vec::with_capacity(endpoints.len());
+    for chunk in endpoints.chunks(READ_CHUNK_SIZE) {
+        let mut multicall = MulticallBuilder::new_dynamic(channels.provider());
+        for (source, destination) in chunk {
+            multicall = multicall.add_dynamic(channels.channels(get_channel_id(*source, *destination)));
+        }
+        states.extend(multicall.aggregate().await?);
+    }
+    Ok(states)
+}
+
+/// Keep only the counterparties whose channel with the node has an on-chain status accepted by the action
+pub async fn filter_counterparties_by_onchain_channel_status<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    action: ChannelClosureAction,
+    node_address: Address,
+    counterparties: &[Address],
+) -> Result<Vec<Address>, HelperErrors> {
+    let endpoints: Vec<(Address, Address)> = counterparties
+        .iter()
+        .map(|counterparty| action.channel_endpoints(node_address, *counterparty))
+        .collect();
+    let states = read_channel_states(channels, &endpoints).await?;
+
+    let mut accepted = Vec::with_capacity(counterparties.len());
+    for (counterparty, state) in counterparties.iter().zip(states) {
+        if action.accepts_onchain_status(state.status) {
+            accepted.push(*counterparty);
+        } else {
+            info!(
+                "node {:?}: skip channel with {:?}, its on-chain status {} does not allow to {}",
+                node_address,
+                counterparty,
+                state.status,
+                action.describe()
+            );
+        }
+    }
+    Ok(accepted)
+}
+
+/// Read the on-chain closure time of outgoing channels from the node to the given destinations.
+///
+/// Only channels that are `PENDING_TO_CLOSE` on-chain are returned, each with its own `closureTime`
+/// (block timestamp at which its closure was initiated plus `NOTICE_PERIOD_CHANNEL_CLOSURE`).
+pub async fn get_pending_outgoing_closures<P: Provider>(
+    channels: &HoprChannelsInstance<P>,
+    node_address: Address,
+    destinations: &[Address],
+) -> Result<Vec<PendingOutgoingClosure>, HelperErrors> {
+    let endpoints: Vec<(Address, Address)> = destinations
+        .iter()
+        .map(|destination| (node_address, *destination))
+        .collect();
+    let states = read_channel_states(channels, &endpoints).await?;
+
+    Ok(destinations
+        .iter()
+        .zip(states)
+        .filter(|(_, state)| state.status == ONCHAIN_CHANNEL_STATUS_PENDING_TO_CLOSE)
+        .map(|(destination, state)| PendingOutgoingClosure {
+            node: node_address,
+            destination: *destination,
+            closure_time: u64::from(state.closureTime),
+        })
+        .collect())
+}
+
+/// Get the notice period (in seconds) between initiating and finalizing the closure of an outgoing channel
+pub async fn get_notice_period_channel_closure<P: Provider>(
+    channels: HoprChannelsInstance<P>,
+) -> Result<u64, HelperErrors> {
+    let notice_period = channels.NOTICE_PERIOD_CHANNEL_CLOSURE().call().await?;
+    Ok(u64::from(notice_period))
+}
+
+/// Get the timestamp of the latest block
+pub async fn get_latest_block_timestamp<P: Provider>(provider: &P) -> Result<u64, HelperErrors> {
+    let block = provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await?
+        .ok_or_else(|| HelperErrors::MiddlewareError("latest block not found".into()))?;
+    Ok(block.header.timestamp)
+}
+
+/// Wait until the chain has produced a block whose timestamp is strictly greater than `target_timestamp`.
+///
+/// The chain time is used (instead of the local clock) because the channel closure notice period
+/// is checked against `block.timestamp` on-chain.
+pub async fn wait_until_block_timestamp_passed<P: Provider>(
+    provider: &P,
+    target_timestamp: u64,
+    max_poll_interval: Duration,
+) -> Result<(), HelperErrors> {
+    loop {
+        let now = get_latest_block_timestamp(provider).await?;
+        if now > target_timestamp {
+            return Ok(());
+        }
+        let remaining = target_timestamp - now + 1;
+        info!("waiting for {remaining} more seconds until the chain time passes {target_timestamp}");
+        // poll at least every second, at most every `max_poll_interval`
+        let sleep_for = Duration::from_secs(remaining)
+            .min(max_poll_interval)
+            .max(Duration::from_secs(1));
+        tokio::time::sleep(sleep_for).await;
+    }
+}
+
 pub type AnvilRpcClient = FillProvider<
     JoinFill<
         JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>>,
@@ -1860,6 +2211,139 @@ mod tests {
             total_transferred_amount,
             U256::from(10),
             "amount transferred does not equal to the desired amount"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_transfer_all_native_tokens_to_safe_in_anvil() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch local anvil instance
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances = ContractInstances::deploy_for_testing(
+            client.clone(),
+            a2h(contract_deployer.public().to_address()),
+            anvil.addresses()[1],
+        )
+        .await
+        .expect("failed to deploy");
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // a safe owned by the deployer
+        let (safe, _) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            *instances.token.address(),
+            vec![],
+            vec![a2h(contract_deployer.public().to_address())],
+            U256::from(1),
+            None,
+        )
+        .await?;
+
+        // a node with some native tokens
+        let node_key = ChainKeypair::random();
+        let node_address = a2h(node_key.public().to_address());
+        let node_funds = U256::from(1_000_000_000_000_000_000_u128);
+        transfer_native_tokens(client.clone(), vec![node_address], vec![node_funds]).await?;
+
+        let safe_balance_before = client.get_balance(*safe.address()).await?;
+        let node_client = create_rpc_client_to_anvil(&anvil, &node_key);
+        let transferred = transfer_all_native_tokens(node_client.clone(), *safe.address()).await?;
+
+        let safe_balance_after = client.get_balance(*safe.address()).await?;
+        let node_balance_after = client.get_balance(node_address).await?;
+        assert!(transferred > U256::ZERO, "some native tokens must be transferred");
+        assert!(transferred < node_funds, "the transfer fee must be deducted");
+        assert_eq!(safe_balance_after - safe_balance_before, transferred);
+        assert_eq!(node_balance_after, U256::ZERO, "the node must be drained");
+
+        // nothing left to transfer
+        assert_eq!(
+            transfer_all_native_tokens(node_client, *safe.address()).await?,
+            U256::ZERO
+        );
+
+        // a balance that cannot cover the transfer fee is left untouched
+        let dust_node_key = ChainKeypair::random();
+        let dust_node_address = a2h(dust_node_key.public().to_address());
+        transfer_native_tokens(client.clone(), vec![dust_node_address], vec![U256::from(1_000)]).await?;
+        let dust_node_client = create_rpc_client_to_anvil(&anvil, &dust_node_key);
+        assert_eq!(
+            transfer_all_native_tokens(dust_node_client, *safe.address()).await?,
+            U256::ZERO
+        );
+        assert_eq!(client.get_balance(dust_node_address).await?, U256::from(1_000));
+        Ok(())
+    }
+
+    #[test]
+    fn test_split_evenly() {
+        assert_eq!(split_evenly(U256::from(10), 3), (U256::from(3), U256::from(1)));
+        assert_eq!(split_evenly(U256::from(9), 3), (U256::from(3), U256::ZERO));
+        assert_eq!(split_evenly(U256::from(2), 3), (U256::ZERO, U256::from(2)));
+        assert_eq!(split_evenly(U256::from(5), 0), (U256::ZERO, U256::from(5)));
+    }
+
+    #[tokio::test]
+    async fn test_transfer_safe_funds_in_anvil() -> anyhow::Result<()> {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // launch local anvil instance
+        let anvil = create_anvil(None);
+        let contract_deployer = ChainKeypair::from_secret(anvil.keys()[0].to_bytes().as_ref())?;
+        let deployer_address = a2h(contract_deployer.public().to_address());
+        let client = create_rpc_client_to_anvil(&anvil, &contract_deployer);
+        let instances =
+            ContractInstances::deploy_for_testing(client.clone(), deployer_address, anvil.addresses()[1]).await?;
+        ContractInstances::deploy_multicall3(client.clone(), anvil.addresses()[1]).await?;
+        ContractInstances::deploy_safe_suites(client.clone(), anvil.addresses()[1]).await?;
+
+        // a safe owned by the deployer, with some tokens and native tokens
+        let (safe, _) = deploy_safe_module_with_targets_and_nodes(
+            instances.stake_factory,
+            *instances.channels.address(),
+            *instances.token.address(),
+            vec![],
+            vec![deployer_address],
+            U256::from(1),
+            None,
+        )
+        .await?;
+        let token_amount = U256::from(5_000_000_000_000_000_000_u128);
+        let native_amount = U256::from(1_000_000_000_000_000_001_u128);
+        transfer_or_mint_tokens(instances.token.clone(), vec![*safe.address()], vec![token_amount]).await?;
+        transfer_native_tokens(client.clone(), vec![*safe.address()], vec![native_amount]).await?;
+
+        let new_safe = get_random_address_for_testing();
+        let nodes: Vec<Address> = (0..3).map(|_| get_random_address_for_testing()).collect();
+        let (tokens, native_per_node) = transfer_safe_funds(
+            safe.clone(),
+            contract_deployer.clone(),
+            instances.token.clone(),
+            new_safe,
+            &nodes,
+        )
+        .await?;
+
+        let (expected_per_node, remainder) = split_evenly(native_amount, nodes.len());
+        assert_eq!(tokens, token_amount);
+        assert_eq!(native_per_node, expected_per_node);
+        assert_eq!(instances.token.balanceOf(new_safe).call().await?, token_amount);
+        assert_eq!(instances.token.balanceOf(*safe.address()).call().await?, U256::ZERO);
+        for node in &nodes {
+            assert_eq!(client.get_balance(*node).await?, expected_per_node);
+        }
+        assert_eq!(client.get_balance(*safe.address()).await?, remainder);
+
+        // nothing left to transfer: the remainder cannot be split
+        assert_eq!(
+            transfer_safe_funds(safe, contract_deployer, instances.token, new_safe, &nodes).await?,
+            (U256::ZERO, U256::ZERO)
         );
         Ok(())
     }
